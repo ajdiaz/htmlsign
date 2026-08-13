@@ -106,15 +106,17 @@
 //! The secret key is never exported — it stays in the encrypted `.hskey`
 //! file.
 //!
-//! With `--txt`, the public key is emitted instead in the compact ASCII85
-//! DNS format
-//! (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>` — no PEM markers) and
-//! split into DNS TXT character-strings of at most 255 bytes each, one per
-//! line, ready to paste as the strings of the `_hs_key.<host>` TXT record.
-//! ASCII85 (20% overhead) keeps the default ML-KEM-768 + ML-DSA-65 record
-//! at ~3946 bytes, within the practical 4096-byte DNS TXT limit that
-//! base64 armor (4329 bytes) exceeds. The record's strings are concatenated
-//! on lookup, and the parser tolerates the split and whitespace (see
+//! With `--txt`, the public key is emitted instead in the compact base-85
+//! DNS format (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>` — no PEM
+//! markers) and split into DNS TXT character-strings of at most 255 bytes
+//! each, one per line, ready to paste (wrapped in double quotes) as the
+//! strings of the `_hs_key.<host>` TXT record. The base-85 alphabet is
+//! DNS-safe — it excludes `"`, `\`, `;`, `(`, `)`, and whitespace — so the
+//! quoting never collides with the payload. Base-85's 20% overhead keeps
+//! the default ML-KEM-768 + ML-DSA-65 record at ~3946 bytes, within the
+//! practical 4096-byte DNS TXT limit that base64 armor (4329 bytes)
+//! exceeds. The record's strings are concatenated on lookup, and the
+//! parser tolerates the split and whitespace (see
 //! [`keys::parse_public_key`]).
 //!
 //! # Global flags
@@ -151,7 +153,8 @@
 //! - **Argon2id** (RFC 9106) via the `argon2` crate.
 //! - **SHA3-256** (FIPS 202) via the `sha3` crate.
 //! - **ASCII85** public-key encoding for compact DNS TXT records, provided
-//!   by the self-contained [`ascii85`] module.
+//!   by the self-contained [`ascii85`] module with a DNS-safe alphabet
+//!   (no `"`, `\`, `;`, `(`, `)`, or whitespace in the output).
 //!
 //! The `pqcrypto` umbrella crate is deliberately avoided
 //! (RUSTSEC-2026-0164, unmaintained).

@@ -178,9 +178,12 @@ ML-KEM-768 ML-DSA-65
 
 Write it to a file with `-o`, or print it pre-split into DNS TXT
 character-strings (≤255 bytes each, one per line) with `--txt`. The `--txt`
-form uses the compact ASCII85 encoding (no PEM markers), so the whole record
-stays under DNS's practical 4096-byte limit — the default ML-KEM-768 +
-ML-DSA-65 key fits in ~3946 bytes, while base64 armor would need 4329:
+form uses a compact base-85 encoding (no PEM markers) whose alphabet is
+DNS-safe — it excludes `"`, `\`, `;`, `(`, `)`, and whitespace — so every
+line can be pasted verbatim between the double quotes of a TXT
+character-string. The whole record stays under DNS's practical 4096-byte
+limit: the default ML-KEM-768 + ML-DSA-65 key fits in ~3946 bytes, while
+base64 armor would need 4329:
 
 ```bash
 $ hs export -k key.hskey --txt
@@ -188,8 +191,10 @@ HS85:ML-KEM-768:ML-DSA-65:9jqo^F*2M7/cQfB.D@-C>O5,&@e'R...
 ...   (255 bytes per line)
 ```
 
-Paste each line as the character-strings of the `_hs_key.<host>` TXT record.
-The private key is never exported — it stays in the encrypted `.hskey`.
+Paste each line between quotes as the character-strings of the
+`_hs_key.<host>` TXT record, e.g.
+`_hs_key.example.org. IN TXT "HS85:..." "..."`. The private key is never
+exported — it stays in the encrypted `.hskey`.
 
 ---
 
@@ -259,10 +264,11 @@ cargo fmt --check
   inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
   verbatim because it is semantically significant.
 - **DNS-friendly keys** 🌐: `export --txt` publishes the public key in a
-  compact ASCII85 encoding (`HS85:<KEM>:<DSA>:<ascii85(keys)>`, no PEM
-  markers) so the whole `_hs_key.<host>` TXT record stays under the
+  compact base-85 encoding (`HS85:<KEM>:<DSA>:<ascii85(keys)>`, no PEM
+  markers, DNS-safe alphabet without `"` `\` `;` `(` `)` or whitespace) so
+  the whole `_hs_key.<host>` TXT record fits between quotes and under the
   practical 4096-byte limit — ~3946 bytes for the default key, versus 4329
-  with base64 armor. (PQ public keys are incompressible, so ASCII85's 20%
+  with base64 armor. (PQ public keys are incompressible, so base-85's 20%
   overhead beats any compression.)
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.

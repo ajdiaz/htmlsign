@@ -209,10 +209,12 @@ pub fn parse_public_key(data: &str) -> Result<KeyInfo, KeyError> {
 ///
 /// The output is a single line of the form
 /// `HS85:ML-KEM-768:ML-DSA-65:<ascii85(kem_pk || dsa_pk)>` with no PEM
-/// markers. Because the key material is incompressible, ASCII85 (20%
-/// overhead) is used instead of compression, keeping the record under the
-/// practical 4096-byte DNS TXT limit for the default key variants
-/// (3136 bytes → 3945 characters including the header).
+/// markers. The base-85 alphabet is DNS-safe (no `"`, `\`, `;`, `(`, `)`,
+/// whitespace), so every chunk can be pasted verbatim between the double
+/// quotes of a DNS TXT character-string. Because the key material is
+/// incompressible, base-85's 20% overhead (vs base64's 33%) is what keeps
+/// the record under the practical 4096-byte DNS TXT limit for the default
+/// key variants (3136 bytes → 3945 characters including the header).
 pub fn ascii85_public_key(info: &KeyInfo) -> String {
     let mut payload = Vec::with_capacity(info.kem_public_key.len() + info.dsa_public_key.len());
     payload.extend_from_slice(&info.kem_public_key);

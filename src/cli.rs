@@ -171,7 +171,7 @@ pub enum Commands {
         /// Emit the ASCII85 public key split into DNS TXT character-strings.
         #[arg(
             long = "txt",
-            help = "Output the ASCII85 public key as DNS TXT character-strings (max 255 bytes each)"
+            help = "Output the public key as DNS TXT character-strings (max 255 bytes each, DNS-safe base-85, no PEM markers)"
         )]
         txt: bool,
         /// Use an empty passphrase (no prompt).
