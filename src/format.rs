@@ -8,12 +8,20 @@
 //! ```
 //!
 //! where the `AlgorithmList` is a `+`-joined canonical list ending in the
-//! encoding algorithm, for example `ML-KEM-768+ML-DSA-65+BASE64`. The
-//! encoded payload (BASE64 for now) contains, in order:
+//! encoding algorithm, for example `SHA3-256+ML-KEM-768+ML-DSA-65+BASE64`.
+//! The encoded payload (BASE64 for now) contains, in order:
 //!
 //! 1. ML-KEM public key (binds the encapsulation key to the block)
 //! 2. ML-DSA public key (used to verify the signature)
-//! 3. ML-DSA signature over the canonical block bytes
+//! 3. ML-DSA signature over the SHA3-256 digest of the canonical block
+//!
+//! Signing follows a hash-then-sign construction: the block is reduced to
+//! its 32-byte SHA3-256 digest first, and that digest is what the ML-DSA
+//! signature covers. The `SHA3-256` marker in the algorithm list records
+//! this for verifiers. Signatures produced before this scheme (algorithm
+//! list without `SHA3-256`) covered the raw block bytes; they still parse
+//! with `decode_signature` reporting `prehashed == false`, so verifiers can
+//! accept legacy blocks too.
 
 use crate::crypto::{DsaVariant, KemVariant};
 use base64::Engine;
@@ -237,15 +245,19 @@ pub struct SignaturePayload {
     pub kem_public_key: Vec<u8>,
     /// ML-DSA public key bytes.
     pub dsa_public_key: Vec<u8>,
-    /// ML-DSA signature over the canonical block bytes.
+    /// ML-DSA signature over the SHA3-256 digest of the block bytes.
     pub signature: Vec<u8>,
+    /// Whether the signature covers the SHA3-256 digest of the block
+    /// (true, current scheme) or the raw canonical bytes (false, legacy
+    /// scheme without a `SHA3-256` marker in the algorithm list).
+    pub prehashed: bool,
 }
 
 /// Encode the components of a signature into a `data-hs-signature` value.
 ///
-/// The value has the form `<KEM>+<DSA>+BASE64:<base64 payload>`, e.g.
-/// `ML-KEM-768+ML-DSA-65+BASE64:QWsd...`. The public key lengths are
-/// validated against the given variants.
+/// The value has the form `<KEM>+<DSA>+SHA3-256+BASE64:<base64 payload>`,
+/// e.g. `ML-KEM-768+ML-DSA-65+SHA3-256+BASE64:QWsd...`. The public key
+/// lengths are validated against the given variants.
 pub fn encode_signature(
     kem_variant: KemVariant,
     dsa_variant: DsaVariant,
@@ -270,6 +282,7 @@ pub fn encode_signature(
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(payload);
     let algs = AlgorithmList::new(vec![
+        Algorithm::Sha3256,
         Algorithm::from_kem_variant(kem_variant),
         Algorithm::from_dsa_variant(dsa_variant),
         Algorithm::Base64,
@@ -281,7 +294,9 @@ pub fn encode_signature(
 ///
 /// Validates that the algorithm list names the exact KEM/DSA variants and
 /// that the payload length matches the expected public key and signature
-/// sizes.
+/// sizes. A `SHA3-256` entry in the list marks the signature as covering
+/// the block's digest; its absence (legacy values) is reported through
+/// [`SignaturePayload::prehashed`].
 pub fn decode_signature(value: &str) -> Result<SignaturePayload, FormatError> {
     let sep = value.find(':').ok_or(FormatError::MissingSeparator)?;
     let alg_str = &value[..sep];
@@ -290,6 +305,7 @@ pub fn decode_signature(value: &str) -> Result<SignaturePayload, FormatError> {
     let algs = AlgorithmList::parse(alg_str)?;
     let kem_variant = algs.kem().ok_or(FormatError::MissingAlgorithm("KEM"))?;
     let dsa_variant = algs.dsa().ok_or(FormatError::MissingAlgorithm("DSA"))?;
+    let prehashed = algs.algorithms().contains(&Algorithm::Sha3256);
 
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
@@ -313,6 +329,7 @@ pub fn decode_signature(value: &str) -> Result<SignaturePayload, FormatError> {
         kem_public_key,
         dsa_public_key,
         signature,
+        prehashed,
     })
 }
 
@@ -359,6 +376,7 @@ mod tests {
             &sig,
         )
         .unwrap();
+        assert!(encoded.starts_with("SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:"));
         let decoded = decode_signature(&encoded).unwrap();
 
         assert_eq!(decoded.kem_variant, KemVariant::MlKem768);
@@ -366,6 +384,24 @@ mod tests {
         assert_eq!(decoded.kem_public_key, kem_pk);
         assert_eq!(decoded.dsa_public_key, dsa_pk);
         assert_eq!(decoded.signature, sig);
+        assert!(decoded.prehashed, "current scheme is hash-then-sign");
+    }
+
+    #[test]
+    fn legacy_signature_decode_reports_unhashed() {
+        let kem_pk = vec![0x41u8; KemVariant::MlKem768.public_key_len()];
+        let dsa_pk = vec![0x42u8; DsaVariant::MlDsa65.public_key_len()];
+        let sig = vec![0x43u8; DsaVariant::MlDsa65.signature_len()];
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&kem_pk);
+        payload.extend_from_slice(&dsa_pk);
+        payload.extend_from_slice(&sig);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(payload);
+        let legacy = format!("ML-KEM-768+ML-DSA-65+BASE64:{}", encoded);
+
+        let decoded = decode_signature(&legacy).unwrap();
+        assert!(!decoded.prehashed, "legacy scheme signs raw block bytes");
     }
 
     #[test]

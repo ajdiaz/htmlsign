@@ -7,7 +7,7 @@ is the content you intended. `hs` freezes the exact bytes of a block into a
 self-contained, post-quantum signature attribute.
 
 ```html
-<div class="text" data-hs-signature="ML-KEM-768+ML-DSA-65+BASE64:QWsd....">
+<div class="text" data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:QWsd....">
   <p>Some text</p>
   <img src="image.jpg">
 </div>
@@ -238,8 +238,12 @@ cargo fmt --check
 ## 🔧 Design notes
 
 - **Signature attribute format**:
-  `data-hs-signature="ML-KEM-768+ML-DSA-65+BASE64:<payload>"` where the
-  payload is `kem_pk || dsa_pk || signature`.
+  `data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:<payload>"`
+  where the payload is `kem_pk || dsa_pk || signature`.
+- **Hash-then-sign** 🧬: the ML-DSA signature covers the 32-byte SHA3-256
+  digest of the block's canonical bytes (marked by the `SHA3-256` entry in
+  the algorithm list), so signing cost is independent of block size. Legacy
+  signatures that covered the raw canonical bytes are still verified.
 - **Self-contained**: the embedded public keys let `verify` work out of the
   box; trust comes from comparing fingerprints or supplying `-k`.
 - **Minification-proof** 🔧: the signature is computed over a canonical form

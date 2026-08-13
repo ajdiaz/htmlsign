@@ -11,12 +11,16 @@
 //! # Signature attribute format
 //!
 //! ```text
-//! data-hs-signature="ML-KEM-768+ML-DSA-65+BASE64:<base64 payload>"
+//! data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:<base64 payload>"
 //! ```
 //!
-//! The payload is `kem_pk || dsa_pk || signature`. The embedded public
-//! keys make every signature self-contained: `verify` works out of the
-//! box, and the key fingerprint lets you confirm *who* signed the block.
+//! The payload is `kem_pk || dsa_pk || signature`, where the ML-DSA
+//! signature covers the 32-byte SHA3-256 digest of the block's canonical
+//! bytes (hash-then-sign). The embedded public keys make every signature
+//! self-contained: `verify` works out of the box, and the key fingerprint
+//! lets you confirm *who* signed the block. Signatures created by earlier
+//! versions of `hs` — which covered the raw canonical bytes and omit the
+//! `SHA3-256` marker — are still verified.
 //!
 //! # Commands
 //!
@@ -56,9 +60,10 @@
 //!
 //! Finds every element matching `SELECTOR` (full CSS selectors supported,
 //! e.g. `div.text`, `#price`, `article[data-id="42"]`), removes any
-//! existing `data-hs-signature`, signs the canonical serialization of the
-//! block, and injects the new signature attribute. The output is written
-//! to `--output` or back over `FILE` in place.
+//! existing `data-hs-signature`, signs the SHA3-256 digest of the canonical
+//! serialization of the block (hash-then-sign, so signing cost is
+//! independent of block size), and injects the new signature attribute.
+//! The output is written to `--output` or back over `FILE` in place.
 //!
 //! The secret key defaults to `~/.local/share/hs/keys/default.hskey`;
 //! use `-k`/`--key` to pick another. The passphrase is prompted unless
@@ -119,13 +124,15 @@
 //!
 //! - Secret keys are never stored raw; they are encrypted with
 //!   Argon2id (default 64 MiB, 3 iterations) + XChaCha20-Poly1305.
-//! - The signature binds a canonical serialization of the block: text
-//!   whitespace is normalized (runs collapse to one space, leading/trailing
-//!   trimmed, whitespace-only text nodes dropped) so signatures survive
-//!   server-side minification, while any change to actual content,
-//!   attributes, or structure still invalidates the signature. Whitespace
-//!   inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
-//!   verbatim.
+//! - The signature binds the SHA3-256 digest of a canonical serialization
+//!   of the block: text whitespace is normalized (runs collapse to one
+//!   space, leading/trailing trimmed, whitespace-only text nodes dropped)
+//!   so signatures survive server-side minification, while any change to
+//!   actual content, attributes, or structure still invalidates the
+//!   signature. Whitespace inside `<pre>`, `<textarea>`, `<script>`, and
+//!   `<style>` is preserved verbatim. Signatures over the raw canonical
+//!   bytes (pre-hash-then-sign values without the `SHA3-256` marker) are
+//!   still accepted on verify.
 //! - Verification is self-contained: the public key is embedded in the
 //!   attribute. Out-of-band trust comes from comparing fingerprints or
 //!   supplying a public key with `verify -k` (armored or `.hskey`).

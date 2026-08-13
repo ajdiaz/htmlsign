@@ -20,6 +20,12 @@
 //! - whitespace-only text nodes (indentation, line breaks between
 //!   elements) are dropped entirely.
 //!
+//! The canonical bytes are then reduced to a 32-byte SHA3-256 digest and
+//! that digest — not the block itself — is what the ML-DSA signature
+//! covers (hash-then-sign). The `SHA3-256` marker in the signature's
+//! algorithm list records this; blocks signed by earlier versions of `hs`
+//! that covered the raw canonical bytes are still verified.
+//!
 //! Whitespace inside [`pre`], [`textarea`], [`script`], and [`style`]
 //! elements is preserved verbatim because it is semantically significant
 //! there. Attribute values and markup structure are never touched.
@@ -37,6 +43,7 @@ use ego_tree::NodeId;
 use html5ever::serialize::{HtmlSerializer, Serialize, SerializeOpts, Serializer, TraversalScope};
 use html5ever::{ns, LocalName, QualName};
 use scraper::{ElementRef, Html, Selector};
+use sha3::{Digest, Sha3_256};
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use tendril::StrTendril;
@@ -185,6 +192,16 @@ fn canonical_html(element: &ElementRef, skip: &str) -> Result<String, HtmlError>
     String::from_utf8(out).map_err(|_| HtmlError::InvalidUtf8)
 }
 
+/// Reduce canonical block bytes to the fixed-size digest that gets signed.
+///
+/// Hash-then-sign: the ML-DSA signature covers this 32-byte SHA3-256
+/// digest instead of the (potentially large) block, so signing cost and
+/// the message fed to the signature primitive are independent of block
+/// size. Both sign and verify compute the same digest.
+fn block_digest(canonical: &[u8]) -> [u8; 32] {
+    Sha3_256::digest(canonical).into()
+}
+
 /// A signing key in memory, ready to sign blocks.
 pub struct SigningKey {
     /// KEM variant.
@@ -269,7 +286,8 @@ pub fn sign_blocks(
         let element = ElementRef::wrap(node_ref).ok_or(HtmlError::MissingElement)?;
 
         let canonical = canonical_html(&element, SIGNATURE_ATTR)?;
-        let signature = sign::sign(&key.dsa_secret_key, canonical.as_bytes(), key.dsa_variant)?;
+        let digest = block_digest(canonical.as_bytes());
+        let signature = sign::sign(&key.dsa_secret_key, &digest, key.dsa_variant)?;
         let value = format::encode_signature(
             key.kem_variant,
             key.dsa_variant,
@@ -353,9 +371,14 @@ pub fn verify_blocks(html: &str) -> Result<Vec<BlockVerification>, HtmlError> {
                 continue;
             }
         };
+        let message: Vec<u8> = if payload.prehashed {
+            block_digest(canonical.as_bytes()).to_vec()
+        } else {
+            canonical.into_bytes()
+        };
         let fingerprint =
             crate::crypto::keyfile::fingerprint(&payload.kem_public_key, &payload.dsa_public_key);
-        let valid = sign::verify(&pk, canonical.as_bytes(), &payload.signature).unwrap_or(false);
+        let valid = sign::verify(&pk, &message, &payload.signature).unwrap_or(false);
         results.push(BlockVerification {
             element: name,
             fingerprint,
@@ -398,6 +421,7 @@ pub fn render_report(results: &[BlockVerification]) -> (String, bool) {
 mod tests {
     use super::*;
     use crate::crypto::keygen;
+    use base64::Engine;
 
     fn test_signing_key() -> SigningKey {
         let pair = keygen::generate(KemVariant::MlKem512, DsaVariant::MlDsa44).unwrap();
@@ -429,8 +453,8 @@ mod tests {
         assert_eq!(signed.len(), 1);
         assert!(signed[0]
             .signature_value
-            .starts_with("ML-KEM-512+ML-DSA-44+BASE64:"));
-        assert!(output.contains(r#"data-hs-signature="ML-KEM-512+ML-DSA-44+BASE64:"#));
+            .starts_with("SHA3-256+ML-KEM-512+ML-DSA-44+BASE64:"));
+        assert!(output.contains(r#"data-hs-signature="SHA3-256+ML-KEM-512+ML-DSA-44+BASE64:"#));
         assert!(output.contains("<p>untouched</p>"));
     }
 
@@ -468,6 +492,48 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].valid, "signed block must verify");
         assert!(results[0].fingerprint.len() == 64);
+    }
+
+    #[test]
+    fn verify_accepts_legacy_unhashed_signature() {
+        let key = test_signing_key();
+        let mut document = Html::parse_document(DOC);
+        let value = {
+            let element = document
+                .select(&Selector::parse("div.text").unwrap())
+                .next()
+                .unwrap();
+            let canonical = canonical_html(&element, SIGNATURE_ATTR).unwrap();
+            let sig =
+                sign::sign(&key.dsa_secret_key, canonical.as_bytes(), key.dsa_variant).unwrap();
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&key.kem_public_key);
+            payload.extend_from_slice(&key.dsa_public_key);
+            payload.extend_from_slice(&sig);
+            let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+            format!("ML-KEM-512+ML-DSA-44+BASE64:{}", b64)
+        };
+
+        let node_id = document
+            .select(&Selector::parse("div.text").unwrap())
+            .next()
+            .unwrap()
+            .id();
+        if let Some(mut node) = document.tree.get_mut(node_id) {
+            if let scraper::Node::Element(element) = node.value() {
+                element.attrs.push((
+                    QualName::new(None, ns!(), LocalName::from(SIGNATURE_ATTR)),
+                    StrTendril::from(value.as_str()),
+                ));
+            }
+        }
+        let output = document.html();
+        let results = verify_blocks(&output).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].valid,
+            "legacy signature over raw canonical bytes must still verify"
+        );
     }
 
     #[test]
