@@ -12,6 +12,18 @@
 //! exact same transform, so the round trip is deterministic regardless of
 //! cosmetic differences in the original markup.
 //!
+//! Before signing, whitespace in text nodes is normalized so the
+//! signature survives server-side minification:
+//!
+//! - runs of ASCII whitespace collapse to a single space,
+//! - leading/trailing whitespace in a text node is trimmed,
+//! - whitespace-only text nodes (indentation, line breaks between
+//!   elements) are dropped entirely.
+//!
+//! Whitespace inside [`pre`], [`textarea`], [`script`], and [`style`]
+//! elements is preserved verbatim because it is semantically significant
+//! there. Attribute values and markup structure are never touched.
+//!
 //! # Output
 //!
 //! Signed blocks are injected into the parsed tree and the whole document
@@ -32,6 +44,11 @@ use thiserror::Error;
 
 /// The attribute that carries an `hs` signature on a signed block.
 pub const SIGNATURE_ATTR: &str = "data-hs-signature";
+
+/// Elements whose text content must be preserved verbatim: whitespace is
+/// semantically significant (`pre`, `textarea`) or managed by separate
+/// minifiers that must not be second-guessed (`script`, `style`).
+const WS_SENSITIVE_ELEMENTS: &[&str] = &["pre", "textarea", "script", "style"];
 
 /// Errors that can occur during HTML parsing, signing, or verification.
 #[derive(Error, Debug)]
@@ -62,31 +79,54 @@ pub enum HtmlError {
     Format(#[from] FormatError),
 }
 
-/// A serializer wrapper that drops a single named attribute during output.
+/// A serializer wrapper that drops a single named attribute during output
+/// and normalizes whitespace in text nodes.
 ///
 /// Used to compute the canonical bytes of a block without its (possibly
-/// stale) `data-hs-signature` attribute.
-struct AttrFilterSerializer<W: Write> {
+/// stale) `data-hs-signature` attribute, and to make those bytes robust to
+/// server-side minification (see the module docs).
+struct CanonicalSerializer<W: Write> {
     inner: HtmlSerializer<W>,
     skip: LocalName,
+    /// Stack marking whether the current nesting level is inside a
+    /// whitespace-sensitive element ([`WS_SENSITIVE_ELEMENTS`]).
+    ws_sensitive: Vec<bool>,
 }
 
-impl<W: Write> Serializer for AttrFilterSerializer<W> {
+impl<W: Write> CanonicalSerializer<W> {
+    /// Whether text at the current nesting depth must be preserved
+    /// verbatim.
+    fn preserving_whitespace(&self) -> bool {
+        self.ws_sensitive.last().copied().unwrap_or(false)
+    }
+}
+
+impl<W: Write> Serializer for CanonicalSerializer<W> {
     fn start_elem<'a, AttrIter>(&mut self, name: QualName, attrs: AttrIter) -> io::Result<()>
     where
         AttrIter: Iterator<Item = (&'a QualName, &'a str)>,
     {
-        let Self { inner, skip } = self;
+        let sensitive =
+            name.ns == ns!(html) && WS_SENSITIVE_ELEMENTS.contains(&name.local.as_ref());
+        self.ws_sensitive.push(sensitive);
+        let Self { inner, skip, .. } = self;
         let filtered = attrs.filter(|(qn, _)| &qn.local != skip);
         inner.start_elem(name, filtered)
     }
 
     fn end_elem(&mut self, name: QualName) -> io::Result<()> {
+        self.ws_sensitive.pop();
         self.inner.end_elem(name)
     }
 
     fn write_text(&mut self, text: &str) -> io::Result<()> {
-        self.inner.write_text(text)
+        if self.preserving_whitespace() {
+            self.inner.write_text(text)
+        } else if let Some(collapsed) = collapse_whitespace(text) {
+            self.inner.write_text(&collapsed)
+        } else {
+            Ok(())
+        }
     }
 
     fn write_comment(&mut self, text: &str) -> io::Result<()> {
@@ -102,6 +142,31 @@ impl<W: Write> Serializer for AttrFilterSerializer<W> {
     }
 }
 
+/// Normalize whitespace in a text node: collapse runs of ASCII whitespace
+/// to a single space, trim leading/trailing whitespace, and return `None`
+/// if nothing meaningful remains.
+///
+/// Non-ASCII spaces such as `\u{00A0}` are preserved untouched so text
+/// content is not altered, only cosmetic whitespace removed.
+fn collapse_whitespace(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut pending_space = false;
+    for c in text.chars() {
+        if c.is_ascii_whitespace() {
+            if !out.is_empty() {
+                pending_space = true;
+            }
+        } else {
+            if pending_space {
+                out.push(' ');
+                pending_space = false;
+            }
+            out.push(c);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// Serialize an element to its canonical HTML, excluding the named attribute.
 fn canonical_html(element: &ElementRef, skip: &str) -> Result<String, HtmlError> {
     let mut out = Vec::new();
@@ -111,9 +176,10 @@ fn canonical_html(element: &ElementRef, skip: &str) -> Result<String, HtmlError>
         create_missing_parent: false,
     };
     let inner = HtmlSerializer::new(&mut out, opts);
-    let mut ser = AttrFilterSerializer {
+    let mut ser = CanonicalSerializer {
         inner,
         skip: LocalName::from(skip),
+        ws_sensitive: Vec::new(),
     };
     element.serialize(&mut ser, TraversalScope::IncludeNode)?;
     String::from_utf8(out).map_err(|_| HtmlError::InvalidUtf8)
@@ -415,12 +481,61 @@ mod tests {
     }
 
     #[test]
-    fn verify_attr_tampering_fails() {
+    fn verify_tolerates_whitespace_only_changes() {
         let key = test_signing_key();
         let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
-        let tampered = output.replace("Some text", "Some text ");
+        let reformatted = output
+            .replace("<p>Some text</p>", "<p>Some   text</p>\n")
+            .replace("</div>", "</div>\n\n");
+        let results = verify_blocks(&reformatted).unwrap();
+        assert!(results[0].valid, "whitespace changes must still verify");
+    }
+
+    #[test]
+    fn verify_tolerates_minified_block() {
+        let key = test_signing_key();
+        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let minified = output
+            .chars()
+            .filter(|&c| c != '\n' && c != '\r' && c != '\t')
+            .collect::<String>();
+        let results = verify_blocks(&minified).unwrap();
+        assert!(results[0].valid, "minified block must still verify");
+    }
+
+    #[test]
+    fn verify_preserves_sensitive_whitespace() {
+        let key = test_signing_key();
+        let html = r#"<div class="x"><pre>a
+  b</pre><script>let x = "a  b";</script></div>"#;
+        let (output, _) = sign_blocks(html, "div.x", &key).unwrap();
+        assert!(verify_blocks(&output).unwrap()[0].valid);
+        let tampered = output.replace("a\n  b", "a\nb");
         let results = verify_blocks(&tampered).unwrap();
-        assert!(!results[0].valid);
+        assert!(
+            !results[0].valid,
+            "whitespace inside <pre> must remain significant"
+        );
+    }
+
+    #[test]
+    fn collapse_whitespace_rules() {
+        assert_eq!(
+            collapse_whitespace("Some text").as_deref(),
+            Some("Some text")
+        );
+        assert_eq!(
+            collapse_whitespace("Some   text").as_deref(),
+            Some("Some text")
+        );
+        assert_eq!(collapse_whitespace("  a\n\t b  ").as_deref(), Some("a b"));
+        assert_eq!(collapse_whitespace("   "), None);
+        assert_eq!(collapse_whitespace("\n\t\n"), None);
+        assert_eq!(
+            collapse_whitespace("a\u{00A0}\u{00A0}b").as_deref(),
+            Some("a\u{00A0}\u{00A0}b"),
+            "non-breaking spaces are preserved"
+        );
     }
 
     #[test]

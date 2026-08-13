@@ -119,9 +119,13 @@
 //!
 //! - Secret keys are never stored raw; they are encrypted with
 //!   Argon2id (default 64 MiB, 3 iterations) + XChaCha20-Poly1305.
-//! - The signature binds the exact serialized bytes of the block, so
-//!   any change to the block content (text, attributes, structure)
-//!   invalidates the signature.
+//! - The signature binds a canonical serialization of the block: text
+//!   whitespace is normalized (runs collapse to one space, leading/trailing
+//!   trimmed, whitespace-only text nodes dropped) so signatures survive
+//!   server-side minification, while any change to actual content,
+//!   attributes, or structure still invalidates the signature. Whitespace
+//!   inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
+//!   verbatim.
 //! - Verification is self-contained: the public key is embedded in the
 //!   attribute. Out-of-band trust comes from comparing fingerprints or
 //!   supplying a public key with `verify -k` (armored or `.hskey`).

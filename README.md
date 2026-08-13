@@ -21,6 +21,9 @@ self-contained, post-quantum signature attribute.
   `article[data-id="42"]`, …).
 - The signature is computed over the **entire block**, including the root
   element and all attributes **except** `data-hs-signature` itself.
+- **Minification-proof**: text whitespace is normalized before signing, so
+  a server can minify or reformat the block without breaking its signature
+  (content, attribute, and structural changes still fail).
 - The signed payload embeds the **ML-KEM + ML-DSA public keys** next to the
   signature, so verification is fully self-contained — no key database needed.
 - **Verify** finds every signed block, recomputes its canonical bytes, and
@@ -239,6 +242,14 @@ cargo fmt --check
   payload is `kem_pk || dsa_pk || signature`.
 - **Self-contained**: the embedded public keys let `verify` work out of the
   box; trust comes from comparing fingerprints or supplying `-k`.
+- **Minification-proof** 🔧: the signature is computed over a canonical form
+  of the block in which text whitespace is normalized — runs collapse to a
+  single space, leading/trailing whitespace is trimmed, and whitespace-only
+  text nodes (indentation, line breaks) are dropped. A server can minify or
+  reformat the block and every signature still validates; changing actual
+  content, attributes, or structure still fails verification. Whitespace
+  inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
+  verbatim because it is semantically significant.
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.
 
