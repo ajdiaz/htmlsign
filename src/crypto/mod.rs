@@ -7,7 +7,7 @@
 //! - [`keygen`] — Combined PQ key pair generation
 //! - [`keyfile`] — Passphrase-encrypted secret key file format
 //!
-//! All randomness uses [`OsRng`]. Secret material is zeroized on drop.
+//! All randomness uses [`rand::rngs::OsRng`]. Secret material is zeroized on drop.
 
 pub mod kem;
 pub mod keyfile;

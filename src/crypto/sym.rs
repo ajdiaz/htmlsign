@@ -89,7 +89,7 @@ pub fn derive_key(
     Ok(key)
 }
 
-/// Generate a random salt of the given length using [`OsRng`].
+/// Generate a random salt of the given length using [`rand::rngs::OsRng`].
 pub fn random_salt(len: usize) -> Vec<u8> {
     let mut salt = vec![0u8; len];
     rand::rngs::OsRng.fill_bytes(&mut salt);

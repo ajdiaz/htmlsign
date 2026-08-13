@@ -97,7 +97,7 @@
 //! - Verification is self-contained: the public key is embedded in the
 //!   attribute. Out-of-band trust comes from comparing fingerprints or
 //!   supplying an armored public key with `verify -k`.
-//! - All randomness comes from [`OsRng`]; secret material is zeroized.
+//! - All randomness comes from [`rand::rngs::OsRng`]; secret material is zeroized.
 //!
 //! # Cryptography
 //!

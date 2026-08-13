@@ -136,7 +136,7 @@ fn dsa_to_byte(v: DsaVariant) -> u8 {
 /// Secret key material to be serialized into a key file.
 ///
 /// Bundles the algorithm variants, seeds, and public keys so they can be
-/// passed to [`to_bytes`] and [`write`] as a single unit.
+/// passed to [`to_bytes`] and [`write`]() as a single unit.
 pub struct SecretMaterial<'a> {
     /// KEM variant.
     pub kem_variant: KemVariant,

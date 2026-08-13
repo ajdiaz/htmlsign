@@ -1,7 +1,7 @@
 //! Key generation, storage, and public key formatting for `hs`.
 //!
 //! Secret keys are stored in passphrase-encrypted `.hskey` files (see
-//! [`crypto::keyfile`]). Public keys can be exported as an armored
+//! [`crate::crypto::keyfile`]). Public keys can be exported as an armored
 //! `-----BEGIN HS PUBLIC KEY-----` block for out-of-band distribution.
 
 use crate::crypto::keyfile::{self, KdfParams, UnlockedKey};
