@@ -29,7 +29,7 @@ complete -c hs -n "__fish_hs_needs_command" -s h -l help -d 'Print help'
 complete -c hs -n "__fish_hs_needs_command" -f -a "gen-key" -d 'Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted'
 complete -c hs -n "__fish_hs_needs_command" -f -a "sign" -d 'Sign HTML blocks matching a CSS selector'
 complete -c hs -n "__fish_hs_needs_command" -f -a "verify" -d 'Verify signed blocks in an HTML file'
-complete -c hs -n "__fish_hs_needs_command" -f -a "export" -d 'Export the armored public key of a key file (for DNS TXT records)'
+complete -c hs -n "__fish_hs_needs_command" -f -a "export" -d 'Export the public key of a key file (armored, or a DNS pin record)'
 complete -c hs -n "__fish_hs_needs_command" -f -a "view-key" -d 'Display information about a key file'
 complete -c hs -n "__fish_hs_needs_command" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -s o -l output -d 'Output path for the secret key file' -r
@@ -56,9 +56,10 @@ complete -c hs -n "__fish_hs_using_subcommand verify" -l no-passphrase -d 'Use a
 complete -c hs -n "__fish_hs_using_subcommand verify" -s n -l dry-run -d 'Do nothing, print dry-run message'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c hs -n "__fish_hs_using_subcommand export" -s k -l key -d 'Path to the secret key file (.hskey)' -r
-complete -c hs -n "__fish_hs_using_subcommand export" -s o -l output -d 'Write the armored public key to this file' -r
+complete -c hs -n "__fish_hs_using_subcommand export" -s o -l output -d 'Write the public key to this file' -r
+complete -c hs -n "__fish_hs_using_subcommand export" -l url -d 'URL of the public key to publish in the _hs_key DNS pin record' -r
 complete -c hs -n "__fish_hs_using_subcommand export" -l passphrase-file -d 'Read the passphrase from a file (first line)' -r
-complete -c hs -n "__fish_hs_using_subcommand export" -l txt -d 'Output the armor split into DNS TXT character-strings'
+complete -c hs -n "__fish_hs_using_subcommand export" -l txt -d 'Output the HSPIN:SHA3-256:<fingerprint>:<url> DNS TXT record (requires --url)'
 complete -c hs -n "__fish_hs_using_subcommand export" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand export" -s n -l dry-run -d 'Do nothing, print dry-run message'
 complete -c hs -n "__fish_hs_using_subcommand export" -s h -l help -d 'Print help'
@@ -70,6 +71,6 @@ complete -c hs -n "__fish_hs_using_subcommand view-key" -s h -l help -d 'Print h
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "gen-key" -d 'Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "sign" -d 'Sign HTML blocks matching a CSS selector'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "verify" -d 'Verify signed blocks in an HTML file'
-complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "export" -d 'Export the armored public key of a key file (for DNS TXT records)'
+complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "export" -d 'Export the public key of a key file (armored, or a DNS pin record)'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "view-key" -d 'Display information about a key file'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'

@@ -2,11 +2,11 @@
 .el .ds Aq '
 .TH export 1  "export " 
 .SH NAME
-export \- Export the public key of a key file (armored, or ASCII85 for DNS TXT)
+export \- Export the public key of a key file (armored, or a DNS pin record)
 .SH SYNOPSIS
-\fBexport\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-txt\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBexport\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-txt\fR] [\fB\-\-url\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Export the public key of a key file (armored, or ASCII85 for DNS TXT)
+Export the public key of a key file (armored, or a DNS pin record)
 .SH OPTIONS
 .TP
 \fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
@@ -15,8 +15,11 @@ Path to the secret key file (.hskey)
 \fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
 Write the public key to this file
 .TP
+\fB\-\-url\fR \fI<URL>\fR
+URL of the public key to publish in the _hs_key DNS pin record
+.TP
 \fB\-\-txt\fR
-Output the public key as DNS TXT character\-strings (max 255 bytes each, DNS\-safe base\-85, no PEM markers)
+Output the HSPIN:SHA3\-256:<fingerprint>:<url> DNS TXT record (requires \-\-url)
 .TP
 \fB\-\-no\-passphrase\fR
 Use an empty passphrase (no prompt)

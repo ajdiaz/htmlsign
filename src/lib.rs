@@ -85,11 +85,13 @@
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless
 //! `--ignore-tls-errors` is given — and the signing public key is resolved
-//! automatically from the DNS TXT record `_hs_key.<host>`, which holds the
-//! public key in the ASCII85 TXT format produced by `export --txt`
-//! (legacy armored records are also accepted). This closes the gap left by
-//! TLS: the connection is authenticated, and the *content* is now pinned
-//! to the key published in DNS.
+//! automatically from the DNS TXT record `_hs_key.<host>`, which holds a
+//! **pin** (`HSPIN:SHA3-256:<fingerprint>:<url>`, see [`net::DnsKeyPin`]).
+//! The key is downloaded from `url` and its SHA3-256 fingerprint is
+//! required to match the pin exactly; legacy records that publish the key
+//! directly are also accepted. This closes the gap left by TLS: the
+//! connection is authenticated, and the *content* is now pinned to the key
+//! whose fingerprint is published in DNS.
 //!
 //! ## `view-key`
 //!
@@ -99,25 +101,21 @@
 //!
 //! ## `export`
 //!
-//! `hs export [-k PATH] [-o PATH] [--txt] [--no-passphrase] [--passphrase-file FILE]`
+//! `hs export [-k PATH] [-o PATH] [--url URL] [--txt] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Unlocks a key file and outputs its **armored public key**
-//! (`-----BEGIN HS PUBLIC KEY-----` block) for out-of-band distribution.
-//! The secret key is never exported — it stays in the encrypted `.hskey`
-//! file.
+//! (`-----BEGIN HS PUBLIC KEY-----` block) for out-of-band distribution or
+//! for serving at a well-known URL. The secret key is never exported — it
+//! stays in the encrypted `.hskey` file.
 //!
-//! With `--txt`, the public key is emitted instead in the compact base-85
-//! DNS format (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>` — no PEM
-//! markers) and split into DNS TXT character-strings of at most 255 bytes
-//! each, one per line, ready to paste (wrapped in double quotes) as the
-//! strings of the `_hs_key.<host>` TXT record. The base-85 alphabet is
-//! DNS-safe — it excludes `"`, `\`, `;`, `(`, `)`, and whitespace — so the
-//! quoting never collides with the payload. Base-85's 20% overhead keeps
-//! the default ML-KEM-768 + ML-DSA-65 record at ~3946 bytes, within the
-//! practical 4096-byte DNS TXT limit that base64 armor (4329 bytes)
-//! exceeds. The record's strings are concatenated on lookup, and the
-//! parser tolerates the split and whitespace (see
-//! [`keys::parse_public_key`]).
+//! With `--txt --url <URL>`, the **DNS pin record** is emitted instead — a
+//! single short line (well under the 255-byte TXT string limit) of the form
+//! `HSPIN:SHA3-256:<fingerprint>:<url>` that pins the key's SHA3-256
+//! fingerprint to the URL where the key itself is served. Publish this line
+//! in the `_hs_key.<host>` TXT record and serve the armored public key at
+//! `<url>`; remote verification downloads the key and requires its
+//! fingerprint to match the pin exactly. See
+//! [`net::resolve_key_from_dns`] and [`net::dns_pin`].
 //!
 //! # Global flags
 //!
@@ -152,9 +150,12 @@
 //! - **XChaCha20-Poly1305** (RFC 8439) via `chacha20poly1305`.
 //! - **Argon2id** (RFC 9106) via the `argon2` crate.
 //! - **SHA3-256** (FIPS 202) via the `sha3` crate.
-//! - **ASCII85** public-key encoding for compact DNS TXT records, provided
-//!   by the self-contained [`ascii85`] module with a DNS-safe alphabet
-//!   (no `"`, `\`, `;`, `(`, `)`, or whitespace in the output).
+//! - **ASCII85** public-key encoding for serving compact key payloads,
+//!   provided by the self-contained [`ascii85`] module with a DNS-safe
+//!   alphabet (no `"`, `\`, `;`, `(`, `)`, or whitespace in the output).
+//! - **DNS key pinning**: remote verification pins the key's SHA3-256
+//!   fingerprint in the `_hs_key.<host>` TXT record and downloads the key
+//!   from the pinned URL, so a compromised server cannot swap keys.
 //!
 //! The `pqcrypto` umbrella crate is deliberately avoided
 //! (RUSTSEC-2026-0164, unmaintained).

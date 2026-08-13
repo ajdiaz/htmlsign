@@ -212,7 +212,7 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
         )
     } else if is_url {
         let host = hs::net::host_of(file)?;
-        Some(hs::net::public_key_from_dns(&host)?)
+        Some(hs::net::resolve_key_from_dns(&host, *ignore_tls_errors)?)
     } else {
         None
     };
@@ -241,6 +241,7 @@ fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
         key,
         output,
         txt,
+        url,
         no_passphrase,
         passphrase_file,
     } = args
@@ -262,7 +263,10 @@ fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
     let armored = keys::armor_public_key(&unlocked.info);
 
     let text = if *txt {
-        hs::net::txt_chunks(&keys::ascii85_public_key(&unlocked.info)).join("\n") + "\n"
+        let url = url
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--txt requires --url"))?;
+        format!("{}\n", hs::net::dns_pin(&unlocked.info, url))
     } else {
         armored
     };
@@ -271,7 +275,7 @@ fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
         Some(out_path) => {
             std::fs::write(out_path, &text).with_context(|| format!("writing {}", out_path))?;
             if *txt {
-                println!("Exported (ASCII85 public key for DNS TXT): {}", out_path);
+                println!("Exported (DNS pin record): {}", out_path);
             } else {
                 println!("Exported (armored public key): {}", out_path);
             }

@@ -193,10 +193,11 @@ pub fn is_armored_key(path: &Path) -> Result<bool, KeyError> {
 
 /// Parse a textual public key payload into its components.
 ///
-/// Accepts either the ASCII85 DNS TXT format
-/// (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>`, used by DNS records)
-/// or the legacy armored `-----BEGIN HS PUBLIC KEY-----` format. The
-/// ASCII85 form carries no PEM markers.
+/// Accepts either the ASCII85 DNS form
+/// (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>`, the legacy DNS record
+/// layout and a compact form for serving key files) or the armored
+/// `-----BEGIN HS PUBLIC KEY-----` format. The ASCII85 form carries no PEM
+/// markers.
 pub fn parse_public_key(data: &str) -> Result<KeyInfo, KeyError> {
     if data.trim_start().starts_with(TXT_KEY_PREFIX) {
         unascii85_public_key(data)

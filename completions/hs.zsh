@@ -80,10 +80,11 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-k+[Path to the secret key file (.hskey)]:KEY:_default' \
 '--key=[Path to the secret key file (.hskey)]:KEY:_default' \
-'-o+[Write the armored public key to this file]:OUTPUT:_default' \
-'--output=[Write the armored public key to this file]:OUTPUT:_default' \
+'-o+[Write the public key to this file]:OUTPUT:_default' \
+'--output=[Write the public key to this file]:OUTPUT:_default' \
+'--url+[URL of the public key to publish in the _hs_key DNS pin record]:URL:_urls' \
 '--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
-'--txt[Output the armor split into DNS TXT character-strings]' \
+'--txt[Output the HSPIN:SHA3-256:<fingerprint>:<url> DNS TXT record (requires --url)]' \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
@@ -154,7 +155,7 @@ _hs_commands() {
 'gen-key:Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted' \
 'sign:Sign HTML blocks matching a CSS selector' \
 'verify:Verify signed blocks in an HTML file' \
-'export:Export the armored public key of a key file (for DNS TXT records)' \
+'export:Export the public key of a key file (armored, or a DNS pin record)' \
 'view-key:Display information about a key file' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -176,7 +177,7 @@ _hs__subcmd__help_commands() {
 'gen-key:Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted' \
 'sign:Sign HTML blocks matching a CSS selector' \
 'verify:Verify signed blocks in an HTML file' \
-'export:Export the armored public key of a key file (for DNS TXT records)' \
+'export:Export the public key of a key file (armored, or a DNS pin record)' \
 'view-key:Display information about a key file' \
 'help:Print this message or the help of the given subcommand(s)' \
     )

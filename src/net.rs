@@ -5,13 +5,20 @@
 //! TLS certificate unless `--ignore-tls-errors` is given — and the signing
 //! public key is resolved from the DNS TXT record `_hs_key.example.org`.
 //!
-//! The DNS record holds the public key in the compact ASCII85 TXT format
-//! produced by `hs export --txt`
-//! (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>`, no PEM markers).
-//! Multiple TXT character-strings within a record are concatenated, so the
-//! payload may be split across the DNS 255-byte character-string
-//! boundaries. Legacy records holding the armored
-//! `-----BEGIN HS PUBLIC KEY-----` block are still accepted.
+//! The record holds a **pin** — the SHA3-256 fingerprint of the public key
+//! and the URL where the key itself is served:
+//!
+//! ```text
+//! HSPIN:SHA3-256:<64-hex-fingerprint>:https://example.org/.well-known/hs.pub
+//! ```
+//!
+//! `hs` downloads the key from that URL (over HTTPS, TLS validated unless
+//! `--ignore-tls-errors`) and requires its SHA3-256 fingerprint to match
+//! the pinned digest exactly. Because the pin lives in DNS (the trust
+//! anchor), a compromised web server cannot swap in a different key — the
+//! fingerprint check would fail. Legacy records that publish the key
+//! directly (armored `-----BEGIN HS PUBLIC KEY-----` or the ASCII85
+//! `HS85:...` form, which `hs export` used before) are still accepted.
 
 use crate::keys;
 use crate::keys::KeyInfo;
@@ -24,12 +31,24 @@ use url::Url;
 /// For host `example.org` the lookup name is `_hs_key.example.org`.
 pub const DNS_KEY_PREFIX: &str = "_hs_key";
 
+/// Marker prefix of the DNS key-pin record produced by `hs export --txt`.
+pub const DNS_PIN_PREFIX: &str = "HSPIN";
+
 /// Maximum length of a single DNS TXT character-string (RFC 1035 §3.3.14).
 pub const DNS_TXT_MAX: usize = 255;
 
 /// Global timeout for HTTP requests, mirroring the `pqp` behaviour of
 /// enforcing a bounded fetch to prevent slow-loris stalls.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A DNS-pinned signing key: a SHA3-256 fingerprint and the URL of the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DnsKeyPin {
+    /// Hex SHA3-256 fingerprint of `kem_pk || dsa_pk` (as in `KeyInfo::fingerprint`).
+    pub fingerprint: String,
+    /// URL from which the public key is served.
+    pub url: String,
+}
 
 /// Errors produced by the `net` module.
 #[derive(Error, Debug)]
@@ -60,9 +79,22 @@ pub enum NetError {
     /// No TXT record was published at the expected DNS name.
     #[error("no _hs_key TXT record found for {0}")]
     NoKey(String),
-    /// The TXT record payload is not a valid armored public key.
+    /// The TXT record payload is not a valid public key or pin.
     #[error("key in DNS for {0} is invalid: {1}")]
     InvalidKey(String, String),
+    /// The DNS pin record is malformed.
+    #[error("invalid DNS key pin: {0}")]
+    InvalidPin(String),
+    /// The key downloaded from the pinned URL does not match the digest.
+    #[error("key at {url} does not match the DNS pin: expected SHA3-256 {expected}, got {got}")]
+    PinMismatch {
+        /// URL the key was downloaded from.
+        url: String,
+        /// Fingerprint recorded in DNS.
+        expected: String,
+        /// Fingerprint of the downloaded key.
+        got: String,
+    },
 }
 
 /// Return whether `input` looks like an `http://` or `https://` URL.
@@ -164,13 +196,18 @@ pub fn dns_txt(name: &str) -> Result<Vec<String>, NetError> {
 /// Resolve the `hs` public key for `host` via the DNS TXT record
 /// `_hs_key.<host>`.
 ///
-/// Each record is parsed with [`keys::parse_public_key`], which accepts
-/// both the ASCII85 TXT format (`HS85:...`) and the legacy armored form;
-/// the first parseable record is used.
-pub fn public_key_from_dns(host: &str) -> Result<KeyInfo, NetError> {
+/// If the record is a pin (`HSPIN:SHA3-256:<fingerprint>:<url>`), the key
+/// is downloaded from `url` and its SHA3-256 fingerprint is validated
+/// against the pin (see [`DnsKeyPin`]); the first matching pin is used.
+/// Legacy records that carry the public key itself (armored or ASCII85,
+/// see [`keys::parse_public_key`]) are also accepted.
+pub fn resolve_key_from_dns(host: &str, ignore_tls_errors: bool) -> Result<KeyInfo, NetError> {
     let name = dns_key_name(host);
     let records = dns_txt(&name)?;
     for record in &records {
+        if let Ok(pin) = parse_dns_pin(record) {
+            return resolve_pin(&pin, ignore_tls_errors);
+        }
         if let Ok(info) = keys::parse_public_key(record) {
             return Ok(info);
         }
@@ -180,9 +217,90 @@ pub fn public_key_from_dns(host: &str) -> Result<KeyInfo, NetError> {
     } else {
         Err(NetError::InvalidKey(
             name,
-            "no record contained a valid public key".into(),
+            "no record contained a valid key or pin".into(),
         ))
     }
+}
+
+/// Download the key pinned by `pin` and validate its fingerprint.
+///
+/// The key body is fetched over HTTP(S) — validating TLS unless
+/// `ignore_tls_errors` is set — parsed as a public key (armored or ASCII85)
+/// and checked against the pinned SHA3-256 digest.
+fn resolve_pin(pin: &DnsKeyPin, ignore_tls_errors: bool) -> Result<KeyInfo, NetError> {
+    let body = fetch_html(&pin.url, ignore_tls_errors)?;
+    let info = keys::parse_public_key(&body)
+        .map_err(|e| NetError::InvalidKey(pin.url.clone(), e.to_string()))?;
+    check_pin(pin, &info)?;
+    Ok(info)
+}
+
+/// Verify that `info`'s fingerprint matches the pinned digest.
+fn check_pin(pin: &DnsKeyPin, info: &KeyInfo) -> Result<(), NetError> {
+    if !info.fingerprint.eq_ignore_ascii_case(&pin.fingerprint) {
+        return Err(NetError::PinMismatch {
+            url: pin.url.clone(),
+            expected: pin.fingerprint.clone(),
+            got: info.fingerprint.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Format the DNS pin record that pins a signing key.
+///
+/// The record is a single short line of the form
+/// `HSPIN:SHA3-256:<fingerprint>:<url>` — well under the 255-byte DNS TXT
+/// character-string limit — where `<fingerprint>` is the hex SHA3-256
+/// digest of `kem_pk || dsa_pk` and `<url>` serves the public key itself.
+pub fn dns_pin(info: &KeyInfo, url: &str) -> String {
+    format!("{}:SHA3-256:{}:{}", DNS_PIN_PREFIX, info.fingerprint, url)
+}
+
+/// Parse a DNS key-pin record into its components.
+///
+/// The record must start with [`DNS_PIN_PREFIX`] followed by
+/// `:<hash>:<hex-fingerprint>:<url>`. Only `SHA3-256` is accepted, the
+/// fingerprint must be exactly 64 hex characters, and the URL must use the
+/// `http://` or `https://` scheme.
+pub fn parse_dns_pin(record: &str) -> Result<DnsKeyPin, NetError> {
+    let body = record
+        .trim()
+        .strip_prefix(DNS_PIN_PREFIX)
+        .ok_or_else(|| NetError::InvalidPin("missing HSPIN prefix".into()))?
+        .strip_prefix(':')
+        .ok_or_else(|| NetError::InvalidPin("missing hash algorithm".into()))?;
+    let mut parts = body.splitn(3, ':');
+    let algo = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| NetError::InvalidPin("missing hash algorithm".into()))?;
+    let digest = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| NetError::InvalidPin("missing fingerprint".into()))?;
+    let url = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| NetError::InvalidPin("missing key URL".into()))?;
+
+    if algo != "SHA3-256" {
+        return Err(NetError::InvalidPin(format!(
+            "unsupported hash algorithm {}",
+            algo
+        )));
+    }
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(NetError::InvalidPin(
+            "fingerprint must be 64 hex characters".into(),
+        ));
+    }
+    parse_url(url)?;
+
+    Ok(DnsKeyPin {
+        fingerprint: digest.to_ascii_lowercase(),
+        url: url.to_string(),
+    })
 }
 
 /// Split a public-key payload into DNS TXT character-strings of at most
@@ -209,6 +327,7 @@ mod tests {
     use super::*;
     use crate::crypto::keygen;
     use crate::crypto::{DsaVariant, KemVariant};
+    use std::io::{Read, Write};
 
     fn sample_armor() -> (String, String) {
         let pair = keygen::generate(KemVariant::MlKem512, DsaVariant::MlDsa44).unwrap();
@@ -319,5 +438,96 @@ mod tests {
     fn public_key_from_dns_rejects_garbage() {
         let err = keys::unarmor_public_key("not a key").unwrap_err();
         assert!(err.to_string().contains("invalid armored public key"));
+    }
+
+    #[test]
+    fn dns_pin_round_trips_through_parse() {
+        let (armor, _fingerprint) = sample_armor();
+        let info = keys::unarmor_public_key(&armor).unwrap();
+        let url = "https://example.org/.well-known/hs.pub";
+        let record = dns_pin(&info, url);
+        assert!(record.starts_with("HSPIN:SHA3-256:"));
+        assert!(record.len() < DNS_TXT_MAX, "pin must fit one TXT string");
+        let pin = parse_dns_pin(&record).unwrap();
+        assert_eq!(pin.url, url);
+        assert_eq!(pin.fingerprint, info.fingerprint);
+        assert_eq!(pin.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn parse_dns_pin_rejects_bad_records() {
+        let hex64 = "a".repeat(64);
+        let err = parse_dns_pin("nope").unwrap_err();
+        assert!(err.to_string().contains("missing HSPIN prefix"));
+        let err = parse_dns_pin("HSPIN:SHA3-256:zz:https://x/").unwrap_err();
+        assert!(err.to_string().contains("64 hex"));
+        let err = parse_dns_pin(&format!("HSPIN:MD5:{}:https://x", hex64)).unwrap_err();
+        assert!(err.to_string().contains("unsupported hash algorithm"));
+        let err = parse_dns_pin(&format!("HSPIN:SHA3-256:{}:ftp://x", hex64)).unwrap_err();
+        assert!(matches!(err, NetError::UnsupportedScheme(_)));
+        let err = parse_dns_pin(&format!("HSPIN:SHA3-256:{}", hex64)).unwrap_err();
+        assert!(err.to_string().contains("missing key URL"));
+    }
+
+    #[test]
+    fn check_pin_detects_mismatch() {
+        let (armor, _fingerprint) = sample_armor();
+        let info = keys::unarmor_public_key(&armor).unwrap();
+        let url = "https://example.org/key.pub".to_string();
+        let good = DnsKeyPin {
+            fingerprint: info.fingerprint.clone(),
+            url: url.clone(),
+        };
+        assert!(check_pin(&good, &info).is_ok());
+        let bad = DnsKeyPin {
+            fingerprint: "0".repeat(64),
+            url,
+        };
+        assert!(matches!(
+            check_pin(&bad, &info),
+            Err(NetError::PinMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_pin_downloads_and_validates_key() {
+        let (armor, _fingerprint) = sample_armor();
+        let info = keys::unarmor_public_key(&armor).unwrap();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body = armor.clone();
+        let thread = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket.write_all(response.as_bytes()).unwrap();
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{}/key.pub", port);
+        let good = DnsKeyPin {
+            fingerprint: info.fingerprint.clone(),
+            url: url.clone(),
+        };
+        let resolved = resolve_pin(&good, true).unwrap();
+        assert_eq!(resolved.fingerprint, info.fingerprint);
+        assert_eq!(resolved.kem_public_key, info.kem_public_key);
+
+        let bad = DnsKeyPin {
+            fingerprint: "0".repeat(64),
+            url,
+        };
+        assert!(matches!(
+            resolve_pin(&bad, true),
+            Err(NetError::PinMismatch { .. })
+        ));
+        thread.join().unwrap();
     }
 }

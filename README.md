@@ -152,21 +152,23 @@ When given a URL, `hs`:
 1. Fetches the document over **HTTPS** and validates the server's TLS
    certificate, failing hard on an invalid cert unless
    `--ignore-tls-errors` is passed.
-2. Resolves the signing public key automatically from the DNS TXT record
-   `_hs_key.example.org` and requires every signed block to match that
-   key's fingerprint.
+2. Reads the DNS TXT record `_hs_key.example.org`, which **pins** the
+   signing key: it holds the key's SHA3-256 fingerprint and the URL where
+   the key is served. `hs` downloads the key from that URL and requires its
+   fingerprint to match the pin exactly, then requires every signed block
+   to match that key.
 
-Publish the public key from `hs export --txt` as a TXT record at
-`_hs_key.<your-domain>`. The record may be split across DNS
-character-strings — `hs` stitches them back together. This closes the gap
-TLS leaves open: TLS authenticates the *endpoint*, the `_hs_key` record pins
-the *content*.
+Publish the pin record from `hs export -k key.hskey --txt --url <URL>` at
+`_hs_key.<your-domain>` and serve the armored public key (`hs export -k
+key.hskey -o key.pub`) at `<URL>`. This closes the gap TLS leaves open: TLS
+authenticates the *endpoint*, the `_hs_key` pin authenticates the *key*, and
+the signature binds the *content*.
 
 ### 📤 Exporting a key for DNS
 
-Export the public key of an existing key file (for the TXT record) without
-regenerating anything. Without `--txt`, the armored form is printed for
-out-of-band distribution:
+Export the public key of an existing key file without regenerating anything.
+Without `--txt`, the armored form is printed for out-of-band distribution
+or for serving at a well-known URL:
 
 ```bash
 $ hs export -k ~/.local/share/hs/keys/default.hskey
@@ -176,24 +178,19 @@ ML-KEM-768 ML-DSA-65
 -----END HS PUBLIC KEY-----
 ```
 
-Write it to a file with `-o`, or print it pre-split into DNS TXT
-character-strings (≤255 bytes each, one per line) with `--txt`. The `--txt`
-form uses a compact base-85 encoding (no PEM markers) whose alphabet is
-DNS-safe — it excludes `"`, `\`, `;`, `(`, `)`, and whitespace — so every
-line can be pasted verbatim between the double quotes of a TXT
-character-string. The whole record stays under DNS's practical 4096-byte
-limit: the default ML-KEM-768 + ML-DSA-65 key fits in ~3946 bytes, while
-base64 armor would need 4329:
+Serve the armored public key at a URL (e.g. `https://example.org/.well-known/hs.pub`),
+then print the DNS pin record that ties that URL to the key's fingerprint
+with `--txt --url`:
 
 ```bash
-$ hs export -k key.hskey --txt
-HS85:ML-KEM-768:ML-DSA-65:9jqo^F*2M7/cQfB.D@-C>O5,&@e'R...
-...   (255 bytes per line)
+$ hs export -k key.hskey --txt --url https://example.org/.well-known/hs.pub
+HSPIN:SHA3-256:7f6a2c...c3d09b:https://example.org/.well-known/hs.pub
 ```
 
-Paste each line between quotes as the character-strings of the
-`_hs_key.<host>` TXT record, e.g.
-`_hs_key.example.org. IN TXT "HS85:..." "..."`. The private key is never
+Paste that single short line as the `_hs_key.<host>` TXT record — it is
+well under the 255-byte character-string limit. `hs verify <URL>` downloads
+the key, checks its SHA3-256 fingerprint against the pin, and fails loudly
+on any mismatch. Write to a file with `-o`. The private key is never
 exported — it stays in the encrypted `.hskey`.
 
 ---
@@ -213,7 +210,7 @@ hs verify FILE|URL [-k KEY.pub|KEY.hskey] [--ignore-tls-errors]
 
 hs view-key [-k KEY.hskey] [--no-passphrase] [--passphrase-file FILE]
 
-hs export [-k KEY.hskey] [-o KEY.pub] [--txt]
+hs export [-k KEY.hskey] [-o KEY.pub] [--txt --url URL]
            [--no-passphrase] [--passphrase-file FILE]
 ```
 
@@ -263,13 +260,12 @@ cargo fmt --check
   content, attributes, or structure still fails verification. Whitespace
   inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
   verbatim because it is semantically significant.
-- **DNS-friendly keys** 🌐: `export --txt` publishes the public key in a
-  compact base-85 encoding (`HS85:<KEM>:<DSA>:<ascii85(keys)>`, no PEM
-  markers, DNS-safe alphabet without `"` `\` `;` `(` `)` or whitespace) so
-  the whole `_hs_key.<host>` TXT record fits between quotes and under the
-  practical 4096-byte limit — ~3946 bytes for the default key, versus 4329
-  with base64 armor. (PQ public keys are incompressible, so base-85's 20%
-  overhead beats any compression.)
+- **DNS-pinned keys** 🌐: remote verification pins the key's SHA3-256
+  fingerprint in the `_hs_key.<host>` TXT record and downloads the key from
+  the pinned URL, validating the digest on every check. The record is a
+  short `HSPIN:SHA3-256:<fingerprint>:<url>` line — no 4096-byte limit, no
+  quoting pitfalls — and a compromised server cannot swap in a different
+  key without the pin failing.
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.
 

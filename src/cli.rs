@@ -151,7 +151,7 @@ pub enum Commands {
         )]
         passphrase_file: Option<String>,
     },
-    /// Export the public key of a key file (armored, or ASCII85 for DNS TXT).
+    /// Export the public key of a key file (armored, or a DNS pin record).
     #[command(name = "export")]
     Export {
         /// Secret key file.
@@ -168,10 +168,17 @@ pub enum Commands {
             help = "Write the public key to this file"
         )]
         output: Option<String>,
-        /// Emit the ASCII85 public key split into DNS TXT character-strings.
+        /// URL where the public key will be served (for the DNS pin record).
+        #[arg(
+            long = "url",
+            help = "URL of the public key to publish in the _hs_key DNS pin record"
+        )]
+        url: Option<String>,
+        /// Emit the DNS pin record (SHA3-256 fingerprint + key URL).
         #[arg(
             long = "txt",
-            help = "Output the public key as DNS TXT character-strings (max 255 bytes each, DNS-safe base-85, no PEM markers)"
+            requires = "url",
+            help = "Output the HSPIN:SHA3-256:<fingerprint>:<url> DNS TXT record (requires --url)"
         )]
         txt: bool,
         /// Use an empty passphrase (no prompt).
