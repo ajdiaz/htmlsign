@@ -4,19 +4,27 @@
 .SH NAME
 verify \- Verify signed blocks in an HTML file
 .SH SYNOPSIS
-\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
+\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
 .SH DESCRIPTION
 Verify signed blocks in an HTML file
 .SH OPTIONS
 .TP
 \fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
-Require blocks to be signed with this armored public key
+Restrict verification to a specific public key.
+
+Accepts either an armored public key file (`key.pub`) or a `.hskey` secret key file (unlocked with the passphrase).
 .TP
 \fB\-\-ignore\-tls\-errors\fR
 Skip TLS certificate validation when verifying a URL
 .TP
+\fB\-\-no\-passphrase\fR
+Use an empty passphrase (no prompt)
+.TP
+\fB\-\-passphrase\-file\fR \fI<PASSPHRASE_FILE>\fR
+Read the passphrase from a file (first line)
+.TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)
 .TP
 <\fIFILE|URL\fR>
 HTML file or URL to verify

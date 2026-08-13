@@ -2,7 +2,8 @@
 //!
 //! Parses command-line arguments via [`cli`](hs::cli), resolves the
 //! passphrase for key operations, and dispatches to the appropriate
-//! handler in [`keys`](hs::keys) and [`html`](hs::html).
+//! handler in [`keys`](hs::keys), [`html`](hs::html), and
+//! [`net`](hs::net) (URL fetch + DNS key resolution for remote verify).
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -174,6 +175,8 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
         file,
         key,
         ignore_tls_errors,
+        no_passphrase,
+        passphrase_file,
     } = args
     else {
         unreachable!()
@@ -191,11 +194,21 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
 
     let mut ok = true;
     let expected = if let Some(pub_path) = key {
-        let armored =
-            std::fs::read_to_string(pub_path).with_context(|| format!("reading {}", pub_path))?;
+        let key_path = PathBuf::from(pub_path);
+        let passphrase = if keys::is_armored_key(&key_path)? {
+            String::new()
+        } else {
+            resolve_passphrase(
+                *no_passphrase,
+                passphrase_file.as_deref(),
+                "Enter passphrase for key: ",
+                false,
+            )?
+            .unwrap_or_default()
+        };
         Some(
-            keys::unarmor_public_key(&armored)
-                .with_context(|| format!("parsing public key {}", pub_path))?,
+            keys::load_public_key(&key_path, &passphrase)
+                .with_context(|| format!("loading public key {}", pub_path))?,
         )
     } else if is_url {
         let host = hs::net::host_of(file)?;
@@ -221,6 +234,48 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
     } else {
         anyhow::bail!("verification failed: key or content mismatch")
     }
+}
+
+fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
+    let Commands::Export {
+        key,
+        output,
+        txt,
+        no_passphrase,
+        passphrase_file,
+    } = args
+    else {
+        unreachable!()
+    };
+
+    let key_path = resolve_key_path(key.clone());
+    let passphrase = resolve_passphrase(
+        *no_passphrase,
+        passphrase_file.as_deref(),
+        "Enter passphrase for key: ",
+        false,
+    )?
+    .unwrap_or_default();
+
+    let unlocked = keys::unlock_key(&key_path, &passphrase)
+        .with_context(|| format!("unlocking key {}", key_path.display()))?;
+    let armored = keys::armor_public_key(&unlocked.info);
+
+    let text = if *txt {
+        hs::net::txt_chunks(&armored).join("\n") + "\n"
+    } else {
+        armored
+    };
+
+    match output {
+        Some(out_path) => {
+            std::fs::write(out_path, &text).with_context(|| format!("writing {}", out_path))?;
+            println!("Exported (armored public key): {}", out_path);
+            println!("  fingerprint: {}", unlocked.info.fingerprint);
+        }
+        None => print!("{}", text),
+    }
+    Ok(())
 }
 
 fn cmd_view_key(args: &hs::cli::Commands) -> Result<()> {
@@ -262,6 +317,7 @@ fn main() -> Result<()> {
             Commands::Sign { .. } => "sign",
             Commands::Verify { .. } => "verify",
             Commands::ViewKey { .. } => "view-key",
+            Commands::Export { .. } => "export",
         };
         eprintln!("[dry-run] would {}: no action taken", what);
         return Ok(());
@@ -272,5 +328,6 @@ fn main() -> Result<()> {
         Commands::Sign { .. } => cmd_sign(&cli.command),
         Commands::Verify { .. } => cmd_verify(&cli.command),
         Commands::ViewKey { .. } => cmd_view_key(&cli.command),
+        Commands::Export { .. } => cmd_export(&cli.command),
     }
 }

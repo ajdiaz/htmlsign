@@ -125,11 +125,14 @@ pub enum Commands {
         /// Input HTML file, or an http(s) URL to fetch and verify.
         #[arg(value_name = "FILE|URL", help = "HTML file or URL to verify")]
         file: String,
-        /// Restrict verification to a specific public key (armored file).
+        /// Restrict verification to a specific public key.
+        ///
+        /// Accepts either an armored public key file (`key.pub`) or a
+        /// `.hskey` secret key file (unlocked with the passphrase).
         #[arg(
             short = 'k',
             long = "key",
-            help = "Require blocks to be signed with this armored public key"
+            help = "Require blocks to be signed with this public key (armored or .hskey)"
         )]
         key: Option<String>,
         /// Do not validate the TLS certificate when fetching a URL.
@@ -138,6 +141,48 @@ pub enum Commands {
             help = "Skip TLS certificate validation when verifying a URL"
         )]
         ignore_tls_errors: bool,
+        /// Use an empty passphrase (no prompt).
+        #[arg(long = "no-passphrase", help = "Use an empty passphrase (no prompt)")]
+        no_passphrase: bool,
+        /// Read the passphrase from a file instead of prompting.
+        #[arg(
+            long = "passphrase-file",
+            help = "Read the passphrase from a file (first line)"
+        )]
+        passphrase_file: Option<String>,
+    },
+    /// Export the armored public key of a key file (for DNS TXT records).
+    #[command(name = "export")]
+    Export {
+        /// Secret key file.
+        #[arg(
+            short = 'k',
+            long = "key",
+            help = "Path to the secret key file (.hskey)"
+        )]
+        key: Option<String>,
+        /// Write the armored public key to this file instead of stdout.
+        #[arg(
+            short = 'o',
+            long = "output",
+            help = "Write the armored public key to this file"
+        )]
+        output: Option<String>,
+        /// Split the armor into DNS TXT character-strings (max 255 bytes each).
+        #[arg(
+            long = "txt",
+            help = "Output the armor split into DNS TXT character-strings"
+        )]
+        txt: bool,
+        /// Use an empty passphrase (no prompt).
+        #[arg(long = "no-passphrase", help = "Use an empty passphrase (no prompt)")]
+        no_passphrase: bool,
+        /// Read the passphrase from a file instead of prompting.
+        #[arg(
+            long = "passphrase-file",
+            help = "Read the passphrase from a file (first line)"
+        )]
+        passphrase_file: Option<String>,
     },
     /// Display information about a key file.
     #[command(name = "view-key")]

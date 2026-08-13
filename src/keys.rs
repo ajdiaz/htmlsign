@@ -113,21 +113,66 @@ pub fn generate_key(
 
 /// Unlock a secret key file with the given passphrase.
 pub fn unlock_key(path: &Path, passphrase: &str) -> Result<SigningKey, KeyError> {
-    let mut unlocked: UnlockedKey = keyfile::read(path, passphrase)?;
+    let bytes = std::fs::read(path)?;
+    let mut unlocked: UnlockedKey = keyfile::from_bytes(&bytes, passphrase)?;
     let result = SigningKey {
-        info: KeyInfo {
-            kem_variant: unlocked.kem_variant,
-            dsa_variant: unlocked.dsa_variant,
-            kem_public_key: unlocked.kem_public_key.clone(),
-            dsa_public_key: unlocked.dsa_public_key.clone(),
-            fingerprint: keyfile::fingerprint(&unlocked.kem_public_key, &unlocked.dsa_public_key),
-        },
+        info: info_from_unlocked(&unlocked),
         dsa_secret_key: unlocked.sign_secret_key()?,
         kem_secret_key: unlocked.kem_secret_key()?,
     };
     unlocked.kem_seed.zeroize();
     unlocked.dsa_seed.zeroize();
     Ok(result)
+}
+
+/// Build the public [`KeyInfo`] from an unlocked key file.
+fn info_from_unlocked(unlocked: &UnlockedKey) -> KeyInfo {
+    KeyInfo {
+        kem_variant: unlocked.kem_variant,
+        dsa_variant: unlocked.dsa_variant,
+        kem_public_key: unlocked.kem_public_key.clone(),
+        dsa_public_key: unlocked.dsa_public_key.clone(),
+        fingerprint: keyfile::fingerprint(&unlocked.kem_public_key, &unlocked.dsa_public_key),
+    }
+}
+
+/// Extract the public key information from raw key file bytes.
+///
+/// Accepts either an armored public key (`-----BEGIN HS PUBLIC KEY-----`,
+/// e.g. as read from a DNS TXT record) or a passphrase-encrypted `.hskey`
+/// secret key file, detecting the format from the contents. The secret
+/// key file is decrypted with `passphrase` before its public half is
+/// returned.
+pub fn public_key_from_bytes(bytes: &[u8], passphrase: &str) -> Result<KeyInfo, KeyError> {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        if text.contains(ARMOR_BEGIN) {
+            return unarmor_public_key(text);
+        }
+    }
+    let mut unlocked = keyfile::from_bytes(bytes, passphrase)?;
+    let info = info_from_unlocked(&unlocked);
+    unlocked.kem_seed.zeroize();
+    unlocked.dsa_seed.zeroize();
+    Ok(info)
+}
+
+/// Load public key information from a file path.
+///
+/// Accepts both armored public key files and `.hskey` secret key files
+/// (see [`public_key_from_bytes`]), so `verify -k` works with either.
+pub fn load_public_key(path: &Path, passphrase: &str) -> Result<KeyInfo, KeyError> {
+    let bytes = std::fs::read(path)?;
+    public_key_from_bytes(&bytes, passphrase)
+}
+
+/// Return true if the file at `path` is an armored public key.
+///
+/// Used to decide whether a passphrase is needed: armored public keys
+/// carry no secret material and are unlocked without one, while `.hskey`
+/// secret key files require the passphrase.
+pub fn is_armored_key(path: &Path) -> Result<bool, KeyError> {
+    let bytes = std::fs::read(path)?;
+    Ok(std::str::from_utf8(&bytes).is_ok_and(|t| t.contains(ARMOR_BEGIN)))
 }
 
 /// Armor a public key for distribution.
@@ -205,4 +250,77 @@ pub fn unarmor_public_key(data: &str) -> Result<KeyInfo, KeyError> {
         dsa_public_key,
         fingerprint,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::keygen;
+    use crate::crypto::{DsaVariant, KemVariant};
+
+    /// Fast Argon2id parameters for tests (8 KiB, 1 iteration).
+    const TEST_PARAMS: KdfParams = KdfParams {
+        mem_cost: 8,
+        time_cost: 1,
+        par_cost: 1,
+    };
+
+    /// Generate one key pair and serialize it both as a passphrase-
+    /// encrypted `.hskey` blob and as an armored public key string.
+    fn sample_key() -> (Vec<u8>, String) {
+        let pair = keygen::generate(KemVariant::MlKem768, DsaVariant::MlDsa65).unwrap();
+        let kem_seed = pair.kem_secret.to_bytes();
+        let dsa_seed = pair.sign_secret.to_bytes();
+        let kem_public = pair.kem_public.to_bytes();
+        let dsa_public = pair.sign_public.to_bytes();
+        let material = keyfile::SecretMaterial {
+            kem_variant: KemVariant::MlKem768,
+            dsa_variant: DsaVariant::MlDsa65,
+            kem_seed: &kem_seed,
+            dsa_seed: &dsa_seed,
+            kem_public_key: &kem_public,
+            dsa_public_key: &dsa_public,
+        };
+        let secret = keyfile::to_bytes(&material, "hunter2", &TEST_PARAMS).unwrap();
+        let info = KeyInfo {
+            kem_variant: KemVariant::MlKem768,
+            dsa_variant: DsaVariant::MlDsa65,
+            kem_public_key: kem_public.clone(),
+            dsa_public_key: dsa_public.clone(),
+            fingerprint: String::new(),
+        };
+        (secret, armor_public_key(&info))
+    }
+
+    #[test]
+    fn public_key_from_bytes_detects_secret_key_file() {
+        let (secret, _armor) = sample_key();
+        assert!(
+            std::str::from_utf8(&secret).is_err(),
+            "hskey must be binary"
+        );
+        let info = public_key_from_bytes(&secret, "hunter2").unwrap();
+        assert_eq!(info.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn public_key_from_bytes_matches_armor_fingerprint() {
+        let (secret, armor) = sample_key();
+        let from_secret = public_key_from_bytes(&secret, "hunter2").unwrap();
+        let from_armor = public_key_from_bytes(armor.as_bytes(), "").unwrap();
+        assert_eq!(from_secret.fingerprint, from_armor.fingerprint);
+    }
+
+    #[test]
+    fn public_key_from_bytes_wrong_passphrase_fails() {
+        let (secret, _armor) = sample_key();
+        let err = public_key_from_bytes(&secret, "wrong").unwrap_err();
+        assert!(err.to_string().contains("decryption"));
+    }
+
+    #[test]
+    fn public_key_from_bytes_garbage_fails() {
+        let err = public_key_from_bytes(b"garbage", "").unwrap_err();
+        assert!(err.to_string().contains("key file"));
+    }
 }

@@ -64,14 +64,31 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (verify)
 _arguments "${_arguments_options[@]}" : \
-'-k+[Require blocks to be signed with this armored public key]:KEY:_default' \
-'--key=[Require blocks to be signed with this armored public key]:KEY:_default' \
+'-k+[Require blocks to be signed with this public key (armored or .hskey)]:KEY:_default' \
+'--key=[Require blocks to be signed with this public key (armored or .hskey)]:KEY:_default' \
+'--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
 '--ignore-tls-errors[Skip TLS certificate validation when verifying a URL]' \
+'--no-passphrase[Use an empty passphrase (no prompt)]' \
+'-n[Do nothing, print dry-run message]' \
+'--dry-run[Do nothing, print dry-run message]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':file -- HTML file or URL to verify:_default' \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+'-k+[Path to the secret key file (.hskey)]:KEY:_default' \
+'--key=[Path to the secret key file (.hskey)]:KEY:_default' \
+'-o+[Write the armored public key to this file]:OUTPUT:_default' \
+'--output=[Write the armored public key to this file]:OUTPUT:_default' \
+'--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
+'--txt[Output the armor split into DNS TXT character-strings]' \
+'--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':file -- HTML file or URL to verify:_default' \
 && ret=0
 ;;
 (view-key)
@@ -110,6 +127,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (view-key)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -133,10 +154,16 @@ _hs_commands() {
 'gen-key:Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted' \
 'sign:Sign HTML blocks matching a CSS selector' \
 'verify:Verify signed blocks in an HTML file' \
+'export:Export the armored public key of a key file (for DNS TXT records)' \
 'view-key:Display information about a key file' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'hs commands' commands "$@"
+}
+(( $+functions[_hs__subcmd__export_commands] )) ||
+_hs__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'hs export commands' commands "$@"
 }
 (( $+functions[_hs__subcmd__gen-key_commands] )) ||
 _hs__subcmd__gen-key_commands() {
@@ -149,10 +176,16 @@ _hs__subcmd__help_commands() {
 'gen-key:Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted' \
 'sign:Sign HTML blocks matching a CSS selector' \
 'verify:Verify signed blocks in an HTML file' \
+'export:Export the armored public key of a key file (for DNS TXT records)' \
 'view-key:Display information about a key file' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'hs help commands' commands "$@"
+}
+(( $+functions[_hs__subcmd__help__subcmd__export_commands] )) ||
+_hs__subcmd__help__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'hs help export commands' commands "$@"
 }
 (( $+functions[_hs__subcmd__help__subcmd__gen-key_commands] )) ||
 _hs__subcmd__help__subcmd__gen-key_commands() {

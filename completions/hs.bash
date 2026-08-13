@@ -16,6 +16,9 @@ _hs() {
             ",$1")
                 cmd="hs"
                 ;;
+            hs,export)
+                cmd="hs__subcmd__export"
+                ;;
             hs,gen-key)
                 cmd="hs__subcmd__gen__subcmd__key"
                 ;;
@@ -30,6 +33,9 @@ _hs() {
                 ;;
             hs,view-key)
                 cmd="hs__subcmd__view__subcmd__key"
+                ;;
+            hs__subcmd__help,export)
+                cmd="hs__subcmd__help__subcmd__export"
                 ;;
             hs__subcmd__help,gen-key)
                 cmd="hs__subcmd__help__subcmd__gen__subcmd__key"
@@ -53,12 +59,46 @@ _hs() {
 
     case "${cmd}" in
         hs)
-            opts="-n -h --dry-run --help gen-key sign verify view-key help"
+            opts="-n -h --dry-run --help gen-key sign verify export view-key help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        hs__subcmd__export)
+            opts="-k -o -n -h --key --output --txt --no-passphrase --passphrase-file --dry-run --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --key)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -k)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --output)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --passphrase-file)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -117,8 +157,22 @@ _hs() {
             return 0
             ;;
         hs__subcmd__help)
-            opts="gen-key sign verify view-key help"
+            opts="gen-key sign verify export view-key help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        hs__subcmd__help__subcmd__export)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -235,7 +289,7 @@ _hs() {
             return 0
             ;;
         hs__subcmd__verify)
-            opts="-k -n -h --key --ignore-tls-errors --dry-run --help"
+            opts="-k -n -h --key --ignore-tls-errors --no-passphrase --passphrase-file --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -246,6 +300,10 @@ _hs() {
                     return 0
                     ;;
                 -k)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --passphrase-file)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

@@ -123,6 +123,15 @@ different key:
 $ hs verify index.html -k key.pub
 ```
 
+`-k` accepts **either** an armored public key file (`key.pub`) **or** the
+`.hskey` secret key file itself — the tool detects the format and unlocks
+the secret key (prompting for its passphrase) to use the embedded public
+half:
+
+```bash
+$ hs verify index.html -k ~/.local/share/hs/keys/default.hskey
+```
+
 ### 🌐 Remote verification via URL
 
 `hs verify` accepts an `http://` or `https://` URL instead of a local file:
@@ -150,6 +159,31 @@ character-strings — `hs` stitches them back together. This closes the gap
 TLS leaves open: TLS authenticates the *endpoint*, the `_hs_key` record pins
 the *content*.
 
+### 📤 Exporting a key for DNS
+
+Export the armored public key of an existing key file (for the TXT record)
+without regenerating anything:
+
+```bash
+$ hs export -k ~/.local/share/hs/keys/default.hskey
+-----BEGIN HS PUBLIC KEY-----
+ML-KEM-768 ML-DSA-65
+...
+-----END HS PUBLIC KEY-----
+```
+
+Write it to a file with `-o`, or print it pre-split into DNS TXT
+character-strings (≤255 bytes each, one per line) with `--txt`:
+
+```bash
+$ hs export -k key.hskey --txt
+-----BEGIN HS PUBLIC KEY----- ML-KEM-768 ML-DSA-65 OXIeM9t6wfQ...
+...
+```
+
+Paste each line as the character-strings of the `_hs_key.<host>` TXT record.
+The private key is never exported — it stays in the encrypted `.hskey`.
+
 ---
 
 ## 📋 CLI reference
@@ -162,9 +196,13 @@ hs gen-key [-o PATH] [--kem ML-KEM-768] [--dsa ML-DSA-65]
 hs sign FILE SELECTOR [-k KEY.hskey] [-o OUT.html]
            [--no-passphrase] [--passphrase-file FILE]
 
-hs verify FILE|URL [-k KEY.pub] [--ignore-tls-errors]
+hs verify FILE|URL [-k KEY.pub|KEY.hskey] [--ignore-tls-errors]
+           [--no-passphrase] [--passphrase-file FILE]
 
 hs view-key [-k KEY.hskey] [--no-passphrase] [--passphrase-file FILE]
+
+hs export [-k KEY.hskey] [-o KEY.pub] [--txt]
+           [--no-passphrase] [--passphrase-file FILE]
 ```
 
 Global flags: `-n, --dry-run` prints what would happen and exits without

@@ -21,6 +21,9 @@ use url::Url;
 /// For host `example.org` the lookup name is `_hs_key.example.org`.
 pub const DNS_KEY_PREFIX: &str = "_hs_key";
 
+/// Maximum length of a single DNS TXT character-string (RFC 1035 §3.3.14).
+pub const DNS_TXT_MAX: usize = 255;
+
 /// Global timeout for HTTP requests, mirroring the `pqp` behaviour of
 /// enforcing a bounded fetch to prevent slow-loris stalls.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -177,6 +180,25 @@ pub fn public_key_from_dns(host: &str) -> Result<KeyInfo, NetError> {
     }
 }
 
+/// Split armored text into DNS TXT character-strings of at most
+/// [`DNS_TXT_MAX`] bytes each.
+///
+/// The armor is first collapsed to a single line (whitespace runs become
+/// single spaces) and then sliced into consecutive ≤255-byte pieces. A
+/// DNS operator publishes one TXT record whose character-strings are the
+/// returned lines; [`dns_txt`] concatenates them back into the single-line
+/// armor, which [`keys::unarmor_public_key`] parses (it tolerates
+/// whitespace splitting). The pieces contain no newlines, so providers
+/// that mangle embedded line breaks still round-trip correctly.
+pub fn txt_chunks(text: &str) -> Vec<String> {
+    let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized
+        .as_bytes()
+        .chunks(DNS_TXT_MAX)
+        .map(|c| String::from_utf8_lossy(c).into_owned())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +242,22 @@ mod tests {
     #[test]
     fn dns_key_name_prefixes_host() {
         assert_eq!(dns_key_name("example.org"), "_hs_key.example.org");
+    }
+
+    #[test]
+    fn txt_chunks_stay_within_255_bytes_and_join_losslessly() {
+        let (armor, _fingerprint) = sample_armor();
+        let chunks = txt_chunks(&armor);
+        assert!(!chunks.is_empty());
+        let expected: String = armor.split_whitespace().collect::<Vec<_>>().join(" ");
+        for chunk in &chunks {
+            assert!(chunk.len() <= DNS_TXT_MAX, "chunk exceeds 255 bytes");
+            assert!(!chunk.contains('\n'), "chunk must not embed newlines");
+        }
+        let joined: String = chunks.concat();
+        assert_eq!(joined, expected);
+        let info = keys::unarmor_public_key(&joined).unwrap();
+        assert_eq!(info.fingerprint.len(), 64);
     }
 
     #[test]

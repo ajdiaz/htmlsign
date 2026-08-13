@@ -26,6 +26,7 @@
 //! | [`sign`](cli::Commands::Sign) | Sign blocks matching a CSS selector |
 //! | [`verify`](cli::Commands::Verify) | Verify blocks carrying `data-hs-signature` |
 //! | [`view-key`](cli::Commands::ViewKey) | Show the fingerprint and algorithms of a key file |
+//! | [`export`](cli::Commands::Export) | Export the armored public key (for DNS TXT records) |
 //!
 //! ## `gen-key`
 //!
@@ -65,13 +66,16 @@
 //!
 //! ## `verify`
 //!
-//! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors]`
+//! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Locates every block with a `data-hs-signature` attribute, recomputes
 //! its canonical bytes, and checks the embedded ML-DSA signature. Exits
 //! non-zero if any block fails. With `-k`/`--key`, blocks are additionally
-//! required to have been signed by exactly the given armored public key
-//! (defeating re-signing of altered content with a different key).
+//! required to have been signed by exactly the given public key (defeating
+//! re-signing of altered content with a different key). `-k` accepts
+//! **either** an armored public key file (`key.pub`) **or** a `.hskey`
+//! secret key file, which is unlocked with the passphrase (prompted
+//! unless `--no-passphrase` or `--passphrase-file` is given).
 //!
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless
@@ -86,6 +90,22 @@
 //! `hs view-key [-k PATH] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Unlocks a key file and prints its algorithms, fingerprint, and paths.
+//!
+//! ## `export`
+//!
+//! `hs export [-k PATH] [-o PATH] [--txt] [--no-passphrase] [--passphrase-file FILE]`
+//!
+//! Unlocks a key file and outputs its **armored public key**
+//! (`-----BEGIN HS PUBLIC KEY-----` block). This is exactly the payload to
+//! publish in the `_hs_key.<host>` DNS TXT record that remote verification
+//! reads. The secret key is never exported — it stays in the encrypted
+//! `.hskey` file.
+//!
+//! With `--txt`, the armor is first collapsed to a single line and then
+//! split into DNS TXT character-strings of at most 255 bytes each, one per
+//! line, so it can be pasted directly as the strings of a TXT record. The
+//! record's strings are concatenated on lookup, and the parser tolerates
+//! the split (see [`keys::unarmor_public_key`]).
 //!
 //! # Global flags
 //!
@@ -104,7 +124,7 @@
 //!   invalidates the signature.
 //! - Verification is self-contained: the public key is embedded in the
 //!   attribute. Out-of-band trust comes from comparing fingerprints or
-//!   supplying an armored public key with `verify -k`.
+//!   supplying a public key with `verify -k` (armored or `.hskey`).
 //! - All randomness comes from [`rand::rngs::OsRng`]; secret material is zeroized.
 //!
 //! # Cryptography
