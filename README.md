@@ -136,16 +136,18 @@ $ hs verify index.html -k ~/.local/share/hs/keys/default.hskey
 ```
 
 For automation, `--format json` emits the result as machine-readable JSON —
-with `ok`, `total`, `verified`, and a `blocks` array (each entry has
-`element`, `valid`, `fingerprint`, `reason`, and `key_match` when a key was
-given):
+with `ok`, `total`, `verified`, a `key` object describing where the key is
+located (`source` is `embedded`, `file`, or `dns`), and a `blocks` array
+(each entry has `element`, `valid`, `fingerprint`, `reason`, and
+`key_match` when a key was given):
 
 ```bash
-$ hs verify index.html --format json
+$ hs verify index.html -k key.pub --format json
 {
   "ok": true,
   "total": 1,
   "verified": 1,
+  "key": { "source": "file", "location": "key.pub" },
   "blocks": [
     {
       "element": "div",

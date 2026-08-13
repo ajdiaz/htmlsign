@@ -84,10 +84,13 @@
 //! `--passphrase-file` is given).
 //!
 //! With `--format json` the report is emitted as machine-readable JSON
-//! instead of text: an object with `ok`, `total`, `verified`, and a `blocks`
-//! array, where each entry carries `element`, `valid`, `fingerprint`,
-//! `reason`, and — when a key was given or resolved from DNS — `key_match`
-//! (see [`html::build_json_report`]).
+//! instead of text: an object with `ok`, `total`, `verified`, a `key`
+//! object describing where the key is located (`source` is `embedded`,
+//! `file`, or `dns`, plus `location` and `url` where applicable), and a
+//! `blocks` array, where each entry carries `element`, `valid`,
+//! `fingerprint`, `reason`, and — when a key was given or resolved from
+//! DNS — `key_match` (see [`html::build_json_report`] and
+//! [`html::KeyOrigin`]).
 //!
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless

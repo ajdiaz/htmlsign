@@ -50,6 +50,17 @@ pub struct DnsKeyPin {
     pub url: String,
 }
 
+/// A public key resolved from DNS, along with where it came from.
+#[derive(Debug, Clone)]
+pub struct DnsKey {
+    /// The resolved public key.
+    pub info: KeyInfo,
+    /// The DNS record name that held the key or pin (`_hs_key.<host>`).
+    pub record: String,
+    /// URL the key was downloaded from, when a pin record was used.
+    pub url: Option<String>,
+}
+
 /// Errors produced by the `net` module.
 #[derive(Error, Debug)]
 pub enum NetError {
@@ -200,16 +211,27 @@ pub fn dns_txt(name: &str) -> Result<Vec<String>, NetError> {
 /// is downloaded from `url` and its SHA3-256 fingerprint is validated
 /// against the pin (see [`DnsKeyPin`]); the first matching pin is used.
 /// Legacy records that carry the public key itself (armored or ASCII85,
-/// see [`keys::parse_public_key`]) are also accepted.
-pub fn resolve_key_from_dns(host: &str, ignore_tls_errors: bool) -> Result<KeyInfo, NetError> {
+/// see [`keys::parse_public_key`]) are also accepted. The returned
+/// [`DnsKey`] records which DNS name and, for pin records, which URL the
+/// key was resolved from.
+pub fn resolve_key_from_dns(host: &str, ignore_tls_errors: bool) -> Result<DnsKey, NetError> {
     let name = dns_key_name(host);
     let records = dns_txt(&name)?;
     for record in &records {
         if let Ok(pin) = parse_dns_pin(record) {
-            return resolve_pin(&pin, ignore_tls_errors);
+            let info = resolve_pin(&pin, ignore_tls_errors)?;
+            return Ok(DnsKey {
+                info,
+                record: name.clone(),
+                url: Some(pin.url),
+            });
         }
         if let Ok(info) = keys::parse_public_key(record) {
-            return Ok(info);
+            return Ok(DnsKey {
+                info,
+                record: name.clone(),
+                url: None,
+            });
         }
     }
     if records.is_empty() {

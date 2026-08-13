@@ -417,6 +417,70 @@ pub fn render_report(results: &[BlockVerification]) -> (String, bool) {
     (report, all_ok)
 }
 
+/// Where the key used for verification comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyOrigin {
+    /// No external key: public keys are read from each block's signature.
+    Embedded,
+    /// A key file supplied with `verify -k`.
+    File(String),
+    /// A key resolved from the `_hs_key.<host>` DNS pin record.
+    Dns {
+        /// The DNS record name the key was resolved from.
+        record: String,
+        /// URL the key was downloaded from, when a pin record was used.
+        url: Option<String>,
+    },
+}
+
+impl KeyOrigin {
+    /// Human-readable description of where the key is located.
+    pub fn describe(&self) -> String {
+        match self {
+            KeyOrigin::Embedded => "embedded in signatures".to_string(),
+            KeyOrigin::File(path) => path.clone(),
+            KeyOrigin::Dns { record, url } => match url {
+                Some(url) => format!("{} ({})", record, url),
+                None => record.clone(),
+            },
+        }
+    }
+
+    /// Machine-readable description of where the key is located.
+    pub fn to_json(&self) -> KeySourceJson {
+        match self {
+            KeyOrigin::Embedded => KeySourceJson {
+                source: "embedded",
+                location: None,
+                url: None,
+            },
+            KeyOrigin::File(path) => KeySourceJson {
+                source: "file",
+                location: Some(path.clone()),
+                url: None,
+            },
+            KeyOrigin::Dns { record, url } => KeySourceJson {
+                source: "dns",
+                location: Some(record.clone()),
+                url: url.clone(),
+            },
+        }
+    }
+}
+
+/// JSON representation of the key's origin in a verification report.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KeySourceJson {
+    /// `embedded`, `file`, or `dns`.
+    pub source: &'static str,
+    /// File path or DNS record name, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// URL the key was downloaded from (DNS pin records only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
 /// Machine-readable verification report for `verify --format json`.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VerificationReportJson {
@@ -426,6 +490,8 @@ pub struct VerificationReportJson {
     pub total: usize,
     /// Number of blocks with valid signatures.
     pub verified: usize,
+    /// Where the verification key is located.
+    pub key: KeySourceJson,
     /// Per-block results.
     pub blocks: Vec<BlockVerificationJson>,
 }
@@ -452,10 +518,12 @@ pub struct BlockVerificationJson {
 /// `key_matches` is an optional per-block list of whether each block's
 /// signature key matched the expected key (set when `verify -k` or DNS key
 /// pinning was used). The overall `ok` flag is true iff every block is
-/// valid and, when a key was given, every block matched it.
+/// valid and, when a key was given, every block matched it. `key_origin`
+/// describes where the key used for verification is located.
 pub fn build_json_report(
     results: &[BlockVerification],
     key_matches: Option<&[bool]>,
+    key_origin: &KeyOrigin,
 ) -> VerificationReportJson {
     let total = results.len();
     let verified = results.iter().filter(|r| r.valid).count();
@@ -481,6 +549,7 @@ pub fn build_json_report(
         ok: all_ok,
         total,
         verified,
+        key: key_origin.to_json(),
         blocks,
     }
 }
@@ -725,7 +794,7 @@ mod tests {
             },
             BlockVerification::failed("span", "signature does not match"),
         ];
-        let report = build_json_report(&results, None);
+        let report = build_json_report(&results, None, &KeyOrigin::Embedded);
         assert_eq!(report.total, 2);
         assert_eq!(report.verified, 1);
         assert!(!report.ok);
@@ -737,6 +806,8 @@ mod tests {
             report.blocks[1].reason.as_deref(),
             Some("signature does not match")
         );
+        assert_eq!(report.key.source, "embedded");
+        assert_eq!(report.key.location, None);
     }
 
     #[test]
@@ -747,13 +818,46 @@ mod tests {
             valid: true,
             reason: None,
         }];
-        let report = build_json_report(&results, Some(&[true]));
+        let origin = KeyOrigin::File("/keys/key.pub".into());
+        let report = build_json_report(&results, Some(&[true]), &origin);
         assert!(report.ok);
         assert_eq!(report.blocks[0].key_match, Some(true));
+        assert_eq!(report.key.source, "file");
+        assert_eq!(report.key.location.as_deref(), Some("/keys/key.pub"));
 
-        let report = build_json_report(&results, Some(&[false]));
+        let report = build_json_report(&results, Some(&[false]), &origin);
         assert!(!report.ok);
         assert_eq!(report.blocks[0].key_match, Some(false));
+    }
+
+    #[test]
+    fn key_origin_describe() {
+        assert_eq!(KeyOrigin::Embedded.describe(), "embedded in signatures");
+        assert_eq!(KeyOrigin::File("key.pub".into()).describe(), "key.pub");
+        assert_eq!(
+            KeyOrigin::Dns {
+                record: "_hs_key.example.org".into(),
+                url: Some("https://example.org/hs.pub".into()),
+            }
+            .describe(),
+            "_hs_key.example.org (https://example.org/hs.pub)"
+        );
+        assert_eq!(
+            KeyOrigin::Dns {
+                record: "_hs_key.example.org".into(),
+                url: None,
+            }
+            .describe(),
+            "_hs_key.example.org"
+        );
+        let json = KeyOrigin::Dns {
+            record: "_hs_key.example.org".into(),
+            url: Some("https://example.org/hs.pub".into()),
+        }
+        .to_json();
+        assert_eq!(json.source, "dns");
+        assert_eq!(json.location.as_deref(), Some("_hs_key.example.org"));
+        assert_eq!(json.url.as_deref(), Some("https://example.org/hs.pub"));
     }
 
     #[test]
@@ -764,14 +868,23 @@ mod tests {
             valid: true,
             reason: None,
         }];
-        let text = serde_json::to_string(&build_json_report(&results, None)).unwrap();
+        let text = serde_json::to_string(&build_json_report(&results, None, &KeyOrigin::Embedded))
+            .unwrap();
         assert!(text.contains("\"ok\":true"));
         assert!(text.contains("\"element\":\"div\""));
+        assert!(text.contains("\"key\":{\"source\":\"embedded\"}"));
         assert!(
             !text.contains("key_match"),
             "key_match must be omitted without a key"
         );
-        let text = serde_json::to_string(&build_json_report(&results, Some(&[true]))).unwrap();
+        let text = serde_json::to_string(&build_json_report(
+            &results,
+            Some(&[true]),
+            &KeyOrigin::File("k.pub".into()),
+        ))
+        .unwrap();
         assert!(text.contains("\"key_match\":true"));
+        assert!(text.contains("\"source\":\"file\""));
+        assert!(text.contains("\"location\":\"k.pub\""));
     }
 }

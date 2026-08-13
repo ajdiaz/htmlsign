@@ -10,7 +10,7 @@ use clap::Parser;
 use hs::cli::{Cli, Commands, OutputFormat};
 use hs::crypto::keyfile::KdfParams;
 use hs::crypto::{DsaVariant, KemVariant};
-use hs::html::{self, BlockVerification, SigningKey};
+use hs::html::{self, BlockVerification, KeyOrigin, SigningKey};
 use hs::keys;
 use std::path::PathBuf;
 
@@ -193,8 +193,10 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
     let results = html::verify_blocks(&html_input)
         .with_context(|| format!("verifying blocks in {}", file))?;
 
+    let mut key_origin = KeyOrigin::Embedded;
     let expected = if let Some(pub_path) = key {
         let key_path = PathBuf::from(pub_path);
+        key_origin = KeyOrigin::File(pub_path.clone());
         let passphrase = if keys::is_armored_key(&key_path)? {
             String::new()
         } else {
@@ -212,7 +214,12 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
         )
     } else if is_url {
         let host = hs::net::host_of(file)?;
-        Some(hs::net::resolve_key_from_dns(&host, *ignore_tls_errors)?)
+        let resolved = hs::net::resolve_key_from_dns(&host, *ignore_tls_errors)?;
+        key_origin = KeyOrigin::Dns {
+            record: resolved.record,
+            url: resolved.url,
+        };
+        Some(resolved.info)
     } else {
         None
     };
@@ -228,10 +235,11 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
 
     match *format {
         OutputFormat::Json => {
-            let report = html::build_json_report(&results, key_matches.as_deref());
+            let report = html::build_json_report(&results, key_matches.as_deref(), &key_origin);
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         OutputFormat::Text => {
+            println!("key: {}", key_origin.describe());
             if let (Some(expected), Some(matches)) = (&expected, &key_matches) {
                 for (r, m) in results.iter().zip(matches) {
                     if !m {
