@@ -26,9 +26,9 @@ pub enum OutputFormat {
 hs embeds a self-contained, post-quantum signature into a data-hs-signature
 attribute on matching HTML blocks, so content can be verified after it has
 crossed the network — a TLS connection authenticates the endpoint, but the
-served content itself is bound to the signature. Verification works out of
-the box because the public keys are embedded in the signature; remote
-verification pins the key via the _hs_key.<host> DNS record."
+served content itself is bound to the signature. Verification checks each
+block against a supplied key: from verify -k, the default key file, or the
+_hs_key.<host> DNS pin record."
 )]
 pub struct Cli {
     /// Print a dry-run message and exit without doing anything.
@@ -166,12 +166,13 @@ given."
     #[command(
         name = "verify",
         long_about = "Locate every block carrying a data-hs-signature attribute, recompute its
-canonical bytes, and check the embedded ML-DSA signature. The command exits
-non-zero if any block is invalid or, when a key is expected, mismatches it.
+canonical bytes, and check the ML-DSA signature against the supplied key.
+The command exits non-zero if any block is invalid.
 
-With -k, every block must additionally be signed by exactly the given
-public key — an armored key.pub or a .hskey secret key file (unlocked with
-the passphrase) — defeating re-signing of altered content.
+The key is taken from -k (an armored key.pub or a .hskey secret key file
+unlocked with the passphrase), from the default key file when verifying a
+local file without -k, or from the _hs_key.<host> DNS pin record when FILE
+is a URL.
 
 When FILE is an http:// or https:// URL, the document is fetched over
 HTTPS (validating the TLS certificate unless --ignore-tls-errors is given)

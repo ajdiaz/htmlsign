@@ -11,16 +11,16 @@
 //! # Signature attribute format
 //!
 //! ```text
-//! data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:<base64 payload>"
+//! data-hs-signature="SHA3-256+ML-DSA-65+BASE64:<base64 signature>"
 //! ```
 //!
-//! The payload is `kem_pk || dsa_pk || signature`, where the ML-DSA
-//! signature covers the 32-byte SHA3-256 digest of the block's canonical
-//! bytes (hash-then-sign). The embedded public keys make every signature
-//! self-contained: `verify` works out of the box, and the key fingerprint
-//! lets you confirm *who* signed the block. Signatures created by earlier
-//! versions of `hs` — which covered the raw canonical bytes and omit the
-//! `SHA3-256` marker — are still verified.
+//! The payload is the ML-DSA signature over the 32-byte SHA3-256 digest of
+//! the block's canonical bytes (hash-then-sign). The public key is
+//! deliberately **not** embedded: verification uses the key supplied by the
+//! user (`verify -k`), the default key file, or the DNS `_hs_key` pin, and
+//! the key fingerprint lets you confirm *who* signed the block. Signatures
+//! created by earlier versions of `hs` — which covered the raw canonical
+//! bytes and omit the `SHA3-256` marker — are still verified.
 //!
 //! # Commands
 //!
@@ -74,23 +74,19 @@
 //! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors] [--format text|json] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Locates every block with a `data-hs-signature` attribute, recomputes
-//! its canonical bytes, and checks the embedded ML-DSA signature. Exits
-//! non-zero if any block is invalid or mismatches the expected key. With
-//! `-k`/`--key`, blocks are additionally required to have been signed by
-//! exactly the given public key (defeating re-signing of altered content
-//! with a different key). `-k` accepts **either** an armored public key
-//! file (`key.pub`) **or** a `.hskey` secret key file, which is unlocked
-//! with the passphrase (prompted unless `--no-passphrase` or
-//! `--passphrase-file` is given).
+//! its canonical bytes, and checks the ML-DSA signature against a key. The
+//! key comes from `-k` (an armored public key file or a `.hskey` secret
+//! key file, unlocked with the passphrase), from the default key file
+//! (`~/.local/share/hs/keys/default.hskey`) when verifying a local file
+//! without `-k`, or from the DNS `_hs_key.<host>` pin record when the
+//! input is a URL. Exits non-zero if any block is invalid.
 //!
 //! With `--format json` the report is emitted as machine-readable JSON
 //! instead of text: an object with `ok`, `total`, `verified`, a `key`
-//! object describing where the key is located (`source` is `embedded`,
-//! `file`, or `dns`, plus `location` and `url` where applicable), and a
-//! `blocks` array, where each entry carries `element`, `valid`,
-//! `fingerprint`, `reason`, and — when a key was given or resolved from
-//! DNS — `key_match` (see [`html::build_json_report`] and
-//! [`html::KeyOrigin`]).
+//! object describing where the key is located (`source` is `file` or
+//! `dns`, plus `location` and `url` where applicable), and a `blocks`
+//! array, where each entry carries `element`, `valid`, `fingerprint`, and
+//! `reason` (see [`html::build_json_report`] and [`html::KeyOrigin`]).
 //!
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless
@@ -148,9 +144,9 @@
 //!   `<style>` is preserved verbatim. Signatures over the raw canonical
 //!   bytes (pre-hash-then-sign values without the `SHA3-256` marker) are
 //!   still accepted on verify.
-//! - Verification is self-contained: the public key is embedded in the
-//!   attribute. Out-of-band trust comes from comparing fingerprints or
-//!   supplying a public key with `verify -k` (armored or `.hskey`).
+//! - Verification always uses an explicitly supplied key — from `verify -k`,
+//!   the default key file, or the DNS `_hs_key` pin — so the trust anchor
+//!   is the key you provide, not a key carried by the document.
 //! - All randomness comes from [`rand::rngs::OsRng`]; secret material is zeroized.
 //!
 //! # Cryptography

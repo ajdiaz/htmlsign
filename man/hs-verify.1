@@ -7,12 +7,13 @@ verify \- Verify signed blocks in an HTML file
 \fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-format\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
 .SH DESCRIPTION
 Locate every block carrying a data\-hs\-signature attribute, recompute its
-canonical bytes, and check the embedded ML\-DSA signature. The command exits
-non\-zero if any block is invalid or, when a key is expected, mismatches it.
+canonical bytes, and check the ML\-DSA signature against the supplied key.
+The command exits non\-zero if any block is invalid.
 .PP
-With \-k, every block must additionally be signed by exactly the given
-public key — an armored key.pub or a .hskey secret key file (unlocked with
-the passphrase) — defeating re\-signing of altered content.
+The key is taken from \-k (an armored key.pub or a .hskey secret key file
+unlocked with the passphrase), from the default key file when verifying a
+local file without \-k, or from the _hs_key.<host> DNS pin record when FILE
+is a URL.
 .PP
 When FILE is an http:// or https:// URL, the document is fetched over
 HTTPS (validating the TLS certificate unless \-\-ignore\-tls\-errors is given)

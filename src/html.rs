@@ -36,6 +36,13 @@
 //! is re-serialized, so `hs` emits well-formed HTML. This may normalize
 //! markup outside the signed blocks; the signed block itself is preserved
 //! as signed.
+//!
+//! # Verification
+//!
+//! The public key is deliberately **not** embedded in the signature.
+//! [`verify_blocks`] checks every block against an explicitly supplied key
+//! — from `verify -k`, the default key file, or the DNS `_hs_key` pin
+//! record (see [`crate::keys::KeyInfo`]).
 
 use crate::crypto::{sign, CryptoError, DsaVariant, KemVariant};
 use crate::format::{self, FormatError};
@@ -288,13 +295,7 @@ pub fn sign_blocks(
         let canonical = canonical_html(&element, SIGNATURE_ATTR)?;
         let digest = block_digest(canonical.as_bytes());
         let signature = sign::sign(&key.dsa_secret_key, &digest, key.dsa_variant)?;
-        let value = format::encode_signature(
-            key.kem_variant,
-            key.dsa_variant,
-            &key.kem_public_key,
-            &key.dsa_public_key,
-            &signature,
-        )?;
+        let value = format::encode_signature(key.dsa_variant, &signature)?;
 
         signed.push(SignedBlock {
             element: name.clone(),
@@ -326,13 +327,19 @@ pub fn sign_blocks(
 
 /// Verify every block carrying a `data-hs-signature` attribute.
 ///
-/// Each block is verified against the ML-DSA public key embedded in its
-/// own signature attribute. Returns one [`BlockVerification`] per signed
-/// block.
-pub fn verify_blocks(html: &str) -> Result<Vec<BlockVerification>, HtmlError> {
+/// Verify every block carrying a `data-hs-signature` attribute against a key.
+///
+/// Every block's signature is checked with the ML-DSA public key from the
+/// supplied `key` (from `verify -k`, the default key file, or the DNS
+/// `_hs_key` pin). Returns one [`BlockVerification`] per signed block.
+pub fn verify_blocks(
+    html: &str,
+    key: &crate::keys::KeyInfo,
+) -> Result<Vec<BlockVerification>, HtmlError> {
     let document = Html::parse_document(html);
     let selector =
         Selector::parse("[data-hs-signature]").map_err(|e| HtmlError::Selector(e.to_string()))?;
+    let pk = sign::PublicKey::from_bytes(&key.dsa_public_key, key.dsa_variant)?;
 
     let mut results = Vec::new();
     for element in document.select(&selector) {
@@ -364,24 +371,26 @@ pub fn verify_blocks(html: &str) -> Result<Vec<BlockVerification>, HtmlError> {
                 continue;
             }
         };
-        let pk = match sign::PublicKey::from_bytes(&payload.dsa_public_key, payload.dsa_variant) {
-            Ok(pk) => pk,
-            Err(e) => {
-                results.push(BlockVerification::failed(&name, e.to_string()));
-                continue;
-            }
-        };
+        if payload.dsa_variant != key.dsa_variant {
+            results.push(BlockVerification::failed(
+                &name,
+                format!(
+                    "signature variant {} does not match key variant {}",
+                    payload.dsa_variant.as_str(),
+                    key.dsa_variant.as_str()
+                ),
+            ));
+            continue;
+        }
         let message: Vec<u8> = if payload.prehashed {
             block_digest(canonical.as_bytes()).to_vec()
         } else {
             canonical.into_bytes()
         };
-        let fingerprint =
-            crate::crypto::keyfile::fingerprint(&payload.kem_public_key, &payload.dsa_public_key);
         let valid = sign::verify(&pk, &message, &payload.signature).unwrap_or(false);
         results.push(BlockVerification {
             element: name,
-            fingerprint,
+            fingerprint: key.fingerprint.clone(),
             valid,
             reason: if valid {
                 None
@@ -420,9 +429,7 @@ pub fn render_report(results: &[BlockVerification]) -> (String, bool) {
 /// Where the key used for verification comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyOrigin {
-    /// No external key: public keys are read from each block's signature.
-    Embedded,
-    /// A key file supplied with `verify -k`.
+    /// A key file supplied with `verify -k` (or the default key file).
     File(String),
     /// A key resolved from the `_hs_key.<host>` DNS pin record.
     Dns {
@@ -437,7 +444,6 @@ impl KeyOrigin {
     /// Human-readable description of where the key is located.
     pub fn describe(&self) -> String {
         match self {
-            KeyOrigin::Embedded => "embedded in signatures".to_string(),
             KeyOrigin::File(path) => path.clone(),
             KeyOrigin::Dns { record, url } => match url {
                 Some(url) => format!("{} ({})", record, url),
@@ -449,11 +455,6 @@ impl KeyOrigin {
     /// Machine-readable description of where the key is located.
     pub fn to_json(&self) -> KeySourceJson {
         match self {
-            KeyOrigin::Embedded => KeySourceJson {
-                source: "embedded",
-                location: None,
-                url: None,
-            },
             KeyOrigin::File(path) => KeySourceJson {
                 source: "file",
                 location: Some(path.clone()),
@@ -471,7 +472,7 @@ impl KeyOrigin {
 /// JSON representation of the key's origin in a verification report.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct KeySourceJson {
-    /// `embedded`, `file`, or `dns`.
+    /// `file` or `dns`.
     pub source: &'static str,
     /// File path or DNS record name, when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -484,7 +485,7 @@ pub struct KeySourceJson {
 /// Machine-readable verification report for `verify --format json`.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VerificationReportJson {
-    /// Whether every block verified and matched the expected key, if any.
+    /// Whether every block verified.
     pub ok: bool,
     /// Total number of signed blocks found.
     pub total: usize,
@@ -503,46 +504,30 @@ pub struct BlockVerificationJson {
     pub element: String,
     /// Whether the signature matches the block content.
     pub valid: bool,
-    /// Fingerprint of the key pair that signed the block (empty if invalid).
+    /// Fingerprint of the key used for verification.
     pub fingerprint: String,
     /// Failure reason, if any.
     pub reason: Option<String>,
-    /// Whether the block's key matched the expected key; present only when
-    /// a key was supplied via `verify -k` or resolved from DNS.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_match: Option<bool>,
 }
 
 /// Build a machine-readable report from verification results.
 ///
-/// `key_matches` is an optional per-block list of whether each block's
-/// signature key matched the expected key (set when `verify -k` or DNS key
-/// pinning was used). The overall `ok` flag is true iff every block is
-/// valid and, when a key was given, every block matched it. `key_origin`
+/// The overall `ok` flag is true iff every block is valid. `key_origin`
 /// describes where the key used for verification is located.
 pub fn build_json_report(
     results: &[BlockVerification],
-    key_matches: Option<&[bool]>,
     key_origin: &KeyOrigin,
 ) -> VerificationReportJson {
     let total = results.len();
     let verified = results.iter().filter(|r| r.valid).count();
-    let mut all_ok = results.iter().all(|r| r.valid);
+    let all_ok = results.iter().all(|r| r.valid);
     let blocks = results
         .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let key_match = key_matches.and_then(|km| km.get(i)).copied();
-            if key_match == Some(false) {
-                all_ok = false;
-            }
-            BlockVerificationJson {
-                element: r.element.clone(),
-                valid: r.valid,
-                fingerprint: r.fingerprint.clone(),
-                reason: r.reason.clone(),
-                key_match,
-            }
+        .map(|r| BlockVerificationJson {
+            element: r.element.clone(),
+            valid: r.valid,
+            fingerprint: r.fingerprint.clone(),
+            reason: r.reason.clone(),
         })
         .collect();
     VerificationReportJson {
@@ -571,6 +556,19 @@ mod tests {
         }
     }
 
+    fn test_key_info(key: &SigningKey) -> crate::keys::KeyInfo {
+        crate::keys::KeyInfo {
+            kem_variant: key.kem_variant,
+            dsa_variant: key.dsa_variant,
+            kem_public_key: key.kem_public_key.clone(),
+            dsa_public_key: key.dsa_public_key.clone(),
+            fingerprint: crate::crypto::keyfile::fingerprint(
+                &key.kem_public_key,
+                &key.dsa_public_key,
+            ),
+        }
+    }
+
     const DOC: &str = r#"<!DOCTYPE html>
 <html>
 <head><title>Test</title></head>
@@ -590,8 +588,8 @@ mod tests {
         assert_eq!(signed.len(), 1);
         assert!(signed[0]
             .signature_value
-            .starts_with("SHA3-256+ML-KEM-512+ML-DSA-44+BASE64:"));
-        assert!(output.contains(r#"data-hs-signature="SHA3-256+ML-KEM-512+ML-DSA-44+BASE64:"#));
+            .starts_with("SHA3-256+ML-DSA-44+BASE64:"));
+        assert!(output.contains(r#"data-hs-signature="SHA3-256+ML-DSA-44+BASE64:"#));
         assert!(output.contains("<p>untouched</p>"));
     }
 
@@ -625,7 +623,7 @@ mod tests {
     fn verify_round_trip_succeeds() {
         let key = test_signing_key();
         let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
-        let results = verify_blocks(&output).unwrap();
+        let results = verify_blocks(&output, &test_key_info(&key)).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].valid, "signed block must verify");
         assert!(results[0].fingerprint.len() == 64);
@@ -643,12 +641,8 @@ mod tests {
             let canonical = canonical_html(&element, SIGNATURE_ATTR).unwrap();
             let sig =
                 sign::sign(&key.dsa_secret_key, canonical.as_bytes(), key.dsa_variant).unwrap();
-            let mut payload = Vec::new();
-            payload.extend_from_slice(&key.kem_public_key);
-            payload.extend_from_slice(&key.dsa_public_key);
-            payload.extend_from_slice(&sig);
-            let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
-            format!("ML-KEM-512+ML-DSA-44+BASE64:{}", b64)
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&sig);
+            format!("ML-DSA-44+BASE64:{}", b64)
         };
 
         let node_id = document
@@ -665,7 +659,7 @@ mod tests {
             }
         }
         let output = document.html();
-        let results = verify_blocks(&output).unwrap();
+        let results = verify_blocks(&output, &test_key_info(&key)).unwrap();
         assert_eq!(results.len(), 1);
         assert!(
             results[0].valid,
@@ -678,7 +672,7 @@ mod tests {
         let key = test_signing_key();
         let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let tampered = output.replace("<p>Some text</p>", "<p>Evil text</p>");
-        let results = verify_blocks(&tampered).unwrap();
+        let results = verify_blocks(&tampered, &test_key_info(&key)).unwrap();
         assert_eq!(results.len(), 1);
         assert!(!results[0].valid, "tampered block must fail verification");
     }
@@ -690,7 +684,7 @@ mod tests {
         let reformatted = output
             .replace("<p>Some text</p>", "<p>Some   text</p>\n")
             .replace("</div>", "</div>\n\n");
-        let results = verify_blocks(&reformatted).unwrap();
+        let results = verify_blocks(&reformatted, &test_key_info(&key)).unwrap();
         assert!(results[0].valid, "whitespace changes must still verify");
     }
 
@@ -702,7 +696,7 @@ mod tests {
             .chars()
             .filter(|&c| c != '\n' && c != '\r' && c != '\t')
             .collect::<String>();
-        let results = verify_blocks(&minified).unwrap();
+        let results = verify_blocks(&minified, &test_key_info(&key)).unwrap();
         assert!(results[0].valid, "minified block must still verify");
     }
 
@@ -712,9 +706,9 @@ mod tests {
         let html = r#"<div class="x"><pre>a
   b</pre><script>let x = "a  b";</script></div>"#;
         let (output, _) = sign_blocks(html, "div.x", &key).unwrap();
-        assert!(verify_blocks(&output).unwrap()[0].valid);
+        assert!(verify_blocks(&output, &test_key_info(&key)).unwrap()[0].valid);
         let tampered = output.replace("a\n  b", "a\nb");
-        let results = verify_blocks(&tampered).unwrap();
+        let results = verify_blocks(&tampered, &test_key_info(&key)).unwrap();
         assert!(
             !results[0].valid,
             "whitespace inside <pre> must remain significant"
@@ -743,7 +737,8 @@ mod tests {
 
     #[test]
     fn verify_no_signed_blocks_errors() {
-        let err = verify_blocks(DOC).unwrap_err();
+        let key = test_signing_key();
+        let err = verify_blocks(DOC, &test_key_info(&key)).unwrap_err();
         assert!(matches!(err, HtmlError::NoSignedBlocks(_)));
     }
 
@@ -762,8 +757,20 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let err = verify_blocks(&stripped).unwrap_err();
+        let err = verify_blocks(&stripped, &test_key_info(&key)).unwrap_err();
         assert!(matches!(err, HtmlError::NoSignedBlocks(_)));
+    }
+
+    #[test]
+    fn verify_wrong_key_fails() {
+        let key = test_signing_key();
+        let other = test_signing_key();
+        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let results = verify_blocks(&output, &test_key_info(&other)).unwrap();
+        assert!(
+            !results[0].valid,
+            "signature made with another key must not verify"
+        );
     }
 
     #[test]
@@ -784,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn build_json_report_without_key() {
+    fn build_json_report_with_file_key() {
         let results = vec![
             BlockVerification {
                 element: "div".into(),
@@ -794,45 +801,46 @@ mod tests {
             },
             BlockVerification::failed("span", "signature does not match"),
         ];
-        let report = build_json_report(&results, None, &KeyOrigin::Embedded);
+        let origin = KeyOrigin::File("/keys/key.pub".into());
+        let report = build_json_report(&results, &origin);
         assert_eq!(report.total, 2);
         assert_eq!(report.verified, 1);
         assert!(!report.ok);
         assert_eq!(report.blocks.len(), 2);
-        assert_eq!(report.blocks[0].key_match, None);
         assert_eq!(report.blocks[0].element, "div");
         assert!(!report.blocks[1].valid);
         assert_eq!(
             report.blocks[1].reason.as_deref(),
             Some("signature does not match")
         );
-        assert_eq!(report.key.source, "embedded");
-        assert_eq!(report.key.location, None);
+        assert_eq!(report.key.source, "file");
+        assert_eq!(report.key.location.as_deref(), Some("/keys/key.pub"));
     }
 
     #[test]
-    fn build_json_report_with_key_mismatch() {
+    fn build_json_report_with_dns_key() {
         let results = vec![BlockVerification {
             element: "div".into(),
             fingerprint: "a".repeat(64),
             valid: true,
             reason: None,
         }];
-        let origin = KeyOrigin::File("/keys/key.pub".into());
-        let report = build_json_report(&results, Some(&[true]), &origin);
+        let origin = KeyOrigin::Dns {
+            record: "_hs_key.example.org".into(),
+            url: Some("https://example.org/hs.pub".into()),
+        };
+        let report = build_json_report(&results, &origin);
         assert!(report.ok);
-        assert_eq!(report.blocks[0].key_match, Some(true));
-        assert_eq!(report.key.source, "file");
-        assert_eq!(report.key.location.as_deref(), Some("/keys/key.pub"));
-
-        let report = build_json_report(&results, Some(&[false]), &origin);
-        assert!(!report.ok);
-        assert_eq!(report.blocks[0].key_match, Some(false));
+        assert_eq!(report.key.source, "dns");
+        assert_eq!(report.key.location.as_deref(), Some("_hs_key.example.org"));
+        assert_eq!(
+            report.key.url.as_deref(),
+            Some("https://example.org/hs.pub")
+        );
     }
 
     #[test]
     fn key_origin_describe() {
-        assert_eq!(KeyOrigin::Embedded.describe(), "embedded in signatures");
         assert_eq!(KeyOrigin::File("key.pub".into()).describe(), "key.pub");
         assert_eq!(
             KeyOrigin::Dns {
@@ -861,30 +869,22 @@ mod tests {
     }
 
     #[test]
-    fn json_report_serializes_with_skip_optional_key_match() {
+    fn json_report_serializes() {
         let results = vec![BlockVerification {
             element: "div".into(),
             fingerprint: "a".repeat(64),
             valid: true,
             reason: None,
         }];
-        let text = serde_json::to_string(&build_json_report(&results, None, &KeyOrigin::Embedded))
-            .unwrap();
-        assert!(text.contains("\"ok\":true"));
-        assert!(text.contains("\"element\":\"div\""));
-        assert!(text.contains("\"key\":{\"source\":\"embedded\"}"));
-        assert!(
-            !text.contains("key_match"),
-            "key_match must be omitted without a key"
-        );
         let text = serde_json::to_string(&build_json_report(
             &results,
-            Some(&[true]),
             &KeyOrigin::File("k.pub".into()),
         ))
         .unwrap();
-        assert!(text.contains("\"key_match\":true"));
+        assert!(text.contains("\"ok\":true"));
+        assert!(text.contains("\"element\":\"div\""));
         assert!(text.contains("\"source\":\"file\""));
         assert!(text.contains("\"location\":\"k.pub\""));
+        assert!(!text.contains("key_match"), "key_match was removed");
     }
 }

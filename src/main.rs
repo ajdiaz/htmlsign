@@ -190,13 +190,9 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
     } else {
         read_html(file)?
     };
-    let results = html::verify_blocks(&html_input)
-        .with_context(|| format!("verifying blocks in {}", file))?;
 
-    let mut key_origin = KeyOrigin::Embedded;
-    let expected = if let Some(pub_path) = key {
+    let (expected, key_origin) = if let Some(pub_path) = key {
         let key_path = PathBuf::from(pub_path);
-        key_origin = KeyOrigin::File(pub_path.clone());
         let passphrase = if keys::is_armored_key(&key_path)? {
             String::new()
         } else {
@@ -208,48 +204,46 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
             )?
             .unwrap_or_default()
         };
-        Some(
+        (
             keys::load_public_key(&key_path, &passphrase)
-                .with_context(|| format!("loading public key {}", pub_path))?,
+                .with_context(|| format!("loading public key {}", key_path.display()))?,
+            KeyOrigin::File(pub_path.clone()),
         )
     } else if is_url {
         let host = hs::net::host_of(file)?;
         let resolved = hs::net::resolve_key_from_dns(&host, *ignore_tls_errors)?;
-        key_origin = KeyOrigin::Dns {
+        let origin = KeyOrigin::Dns {
             record: resolved.record,
             url: resolved.url,
         };
-        Some(resolved.info)
+        (resolved.info, origin)
     } else {
-        None
+        let key_path = resolve_key_path(None);
+        let passphrase = resolve_passphrase(
+            *no_passphrase,
+            passphrase_file.as_deref(),
+            "Enter passphrase for key: ",
+            false,
+        )?
+        .unwrap_or_default();
+        (
+            keys::load_public_key(&key_path, &passphrase)
+                .with_context(|| format!("loading public key {}", key_path.display()))?,
+            KeyOrigin::File(key_path.display().to_string()),
+        )
     };
 
-    let key_matches = expected.as_ref().map(|expected| {
-        results
-            .iter()
-            .map(|r| r.fingerprint == expected.fingerprint)
-            .collect::<Vec<bool>>()
-    });
-    let ok = results.iter().all(|r| r.valid)
-        && key_matches.as_ref().is_none_or(|km| km.iter().all(|&m| m));
+    let results = html::verify_blocks(&html_input, &expected)
+        .with_context(|| format!("verifying blocks in {}", file))?;
+    let ok = results.iter().all(|r| r.valid);
 
     match *format {
         OutputFormat::Json => {
-            let report = html::build_json_report(&results, key_matches.as_deref(), &key_origin);
+            let report = html::build_json_report(&results, &key_origin);
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         OutputFormat::Text => {
             println!("key: {}", key_origin.describe());
-            if let (Some(expected), Some(matches)) = (&expected, &key_matches) {
-                for (r, m) in results.iter().zip(matches) {
-                    if !m {
-                        println!(
-                            "[<{}>] key fingerprint mismatch: got {} (expected {})",
-                            r.element, r.fingerprint, expected.fingerprint
-                        );
-                    }
-                }
-            }
             print_verification_results(&results)?;
         }
     }

@@ -11,9 +11,9 @@ Sign and verify blocks of HTML (SGML/XML in general) with post\-quantum cryptogr
 hs embeds a self\-contained, post\-quantum signature into a data\-hs\-signature
 attribute on matching HTML blocks, so content can be verified after it has
 crossed the network — a TLS connection authenticates the endpoint, but the
-served content itself is bound to the signature. Verification works out of
-the box because the public keys are embedded in the signature; remote
-verification pins the key via the _hs_key.<host> DNS record.
+served content itself is bound to the signature. Verification checks each
+block against a supplied key: from verify \-k, the default key file, or the
+_hs_key.<host> DNS pin record.
 .SH OPTIONS
 .TP
 \fB\-n\fR, \fB\-\-dry\-run\fR

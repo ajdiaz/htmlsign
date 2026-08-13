@@ -7,7 +7,7 @@ is the content you intended. `hs` freezes the exact bytes of a block into a
 self-contained, post-quantum signature attribute.
 
 ```html
-<div class="text" data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:QWsd....">
+<div class="text" data-hs-signature="SHA3-256+ML-DSA-65+BASE64:QWsd....">
   <p>Some text</p>
   <img src="image.jpg">
 </div>
@@ -24,10 +24,12 @@ self-contained, post-quantum signature attribute.
 - **Minification-proof**: text whitespace is normalized before signing, so
   a server can minify or reformat the block without breaking its signature
   (content, attribute, and structural changes still fail).
-- The signed payload embeds the **ML-KEM + ML-DSA public keys** next to the
-  signature, so verification is fully self-contained — no key database needed.
+- The signature is a plain ML-DSA signature — the **public key is not
+  embedded**. Verification always uses a key you supply: `verify -k
+  key.pub`, the default key file, or the key pinned in the `_hs_key.<host>`
+  DNS record for URL verification.
 - **Verify** finds every signed block, recomputes its canonical bytes, and
-  checks the embedded ML-DSA signature.
+  checks the ML-DSA signature against that key.
 - Keys are stored **passphrase-encrypted** (Argon2id + XChaCha20-Poly1305),
   never in plaintext on disk.
 
@@ -102,44 +104,44 @@ Options: `-k key.hskey`, `-o out.html`, `--no-passphrase`,
 
 ## ✔️ Verifying
 
+Verify a local file against the **default key** (`~/.local/share/hs/keys/default.hskey`):
+
 ```bash
 $ hs verify index.html
+key: /home/user/.local/share/hs/keys/default.hskey
 [0] <div> OK
       fingerprint: 7f6a2c...c3d09b
 OK: 1 of 1 blocks verified.
 ```
 
-Tampered content fails loudly:
-
-```bash
-$ hs verify tampered.html
-[0] <div> FAIL
-      reason: signature verification failed
-FAIL: 0 of 1 blocks verified.
-```
-
-Use `-k key.pub` to additionally **require** that every block was signed by
-that exact public key — defeating re-signing of altered content with a
-different key:
+Verify against a specific key with `-k`:
 
 ```bash
 $ hs verify index.html -k key.pub
+key: key.pub
+[0] <div> OK
 ```
 
 `-k` accepts **either** an armored public key file (`key.pub`) **or** the
 `.hskey` secret key file itself — the tool detects the format and unlocks
-the secret key (prompting for its passphrase) to use the embedded public
-half:
+the secret key (prompting for its passphrase) to use its public half. The
+`key:` line reports where the key used for verification came from (a file
+or the DNS pin record).
+
+Tampered content fails loudly:
 
 ```bash
-$ hs verify index.html -k ~/.local/share/hs/keys/default.hskey
+$ hs verify tampered.html
+key: /home/user/.local/share/hs/keys/default.hskey
+[0] <div> FAIL
+      reason: signature does not match block content
+FAIL: 0 of 1 blocks verified.
 ```
 
 For automation, `--format json` emits the result as machine-readable JSON —
 with `ok`, `total`, `verified`, a `key` object describing where the key is
-located (`source` is `embedded`, `file`, or `dns`), and a `blocks` array
-(each entry has `element`, `valid`, `fingerprint`, `reason`, and
-`key_match` when a key was given):
+located (`source` is `file` or `dns`), and a `blocks` array (each entry has
+`element`, `valid`, `fingerprint`, and `reason`):
 
 ```bash
 $ hs verify index.html -k key.pub --format json
@@ -153,16 +155,14 @@ $ hs verify index.html -k key.pub --format json
       "element": "div",
       "valid": true,
       "fingerprint": "7f6a2c...c3d09b",
-      "reason": null,
-      "key_match": true
+      "reason": null
     }
   ]
 }
 ```
 
 The exit status is non-zero whenever the verification fails (any invalid
-block or key mismatch), so `hs verify --format json` drops straight into a
-CI pipeline.
+block), so `hs verify --format json` drops straight into a CI pipeline.
 
 ### 🌐 Remote verification via URL
 
@@ -274,14 +274,15 @@ cargo fmt --check
 ## 🔧 Design notes
 
 - **Signature attribute format**:
-  `data-hs-signature="SHA3-256+ML-KEM-768+ML-DSA-65+BASE64:<payload>"`
-  where the payload is `kem_pk || dsa_pk || signature`.
+  `data-hs-signature="SHA3-256+ML-DSA-65+BASE64:<signature>"` — the payload
+  is the ML-DSA signature only; the public key is **not** embedded.
 - **Hash-then-sign** 🧬: the ML-DSA signature covers the 32-byte SHA3-256
   digest of the block's canonical bytes (marked by the `SHA3-256` entry in
   the algorithm list), so signing cost is independent of block size. Legacy
   signatures that covered the raw canonical bytes are still verified.
-- **Self-contained**: the embedded public keys let `verify` work out of the
-  box; trust comes from comparing fingerprints or supplying `-k`.
+- **Key supplied at verify time** 🔑: the trust anchor is the key you give
+  `hs verify` (`-k`, the default key file, or the `_hs_key.<host>` DNS
+  pin). Nothing about the document is trusted; the key binds the content.
 - **Minification-proof** 🔧: the signature is computed over a canonical form
   of the block in which text whitespace is normalized — runs collapse to a
   single space, leading/trailing whitespace is trimmed, and whitespace-only
