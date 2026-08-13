@@ -17,8 +17,10 @@ _hs() {
     _arguments "${_arguments_options[@]}" : \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'-V[Print version]' \
+'--version[Print version]' \
 ":: :_hs_commands" \
 "*::: :->hs" \
 && ret=0
@@ -30,8 +32,8 @@ _hs() {
         case $line[1] in
             (gen-key)
 _arguments "${_arguments_options[@]}" : \
-'-o+[Output path for the secret key file]:OUTPUT:_default' \
-'--output=[Output path for the secret key file]:OUTPUT:_default' \
+'-o+[Output path for the secret key file (default\: ~/.local/share/hs/keys/default.hskey)]:OUTPUT:_default' \
+'--output=[Output path for the secret key file (default\: ~/.local/share/hs/keys/default.hskey)]:OUTPUT:_default' \
 '--public-key=[Write the armored public key to this path]:PUBLIC_KEY:_default' \
 '--kem=[KEM algorithm variant\: ML-KEM-512, ML-KEM-768, ML-KEM-1024]:KEM:_default' \
 '--dsa=[Digital signature variant\: ML-DSA-44, ML-DSA-65, ML-DSA-87]:DSA:_default' \
@@ -42,8 +44,8 @@ _arguments "${_arguments_options[@]}" : \
 '--no-passphrase[Store the key without a passphrase]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (sign)
@@ -51,13 +53,13 @@ _arguments "${_arguments_options[@]}" : \
 '-k+[Path to the secret key file (.hskey)]:KEY:_default' \
 '--key=[Path to the secret key file (.hskey)]:KEY:_default' \
 '--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
-'-o+[Output HTML file path]:OUTPUT:_default' \
-'--output=[Output HTML file path]:OUTPUT:_default' \
+'-o+[Output HTML file path (default\: overwrite FILE)]:OUTPUT:_default' \
+'--output=[Output HTML file path (default\: overwrite FILE)]:OUTPUT:_default' \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':file -- HTML file to sign:_default' \
 ':selector -- CSS selector of the block(s) to sign:_default' \
 && ret=0
@@ -66,9 +68,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '-k+[Require blocks to be signed with this public key (armored or .hskey)]:KEY:_default' \
 '--key=[Require blocks to be signed with this public key (armored or .hskey)]:KEY:_default' \
+'--format=[Output format\: text (default) or json]:FORMAT:((text\:"Human-readable text report"
+json\:"Machine-readable JSON report"))' \
 '--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
 '--ignore-tls-errors[Skip TLS certificate validation when verifying a URL]' \
-'--format=[Output format: text (default) or json]:FORMAT:(text json)' \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
@@ -83,14 +86,14 @@ _arguments "${_arguments_options[@]}" : \
 '--key=[Path to the secret key file (.hskey)]:KEY:_default' \
 '-o+[Write the public key to this file]:OUTPUT:_default' \
 '--output=[Write the public key to this file]:OUTPUT:_default' \
-'--url+[URL of the public key to publish in the _hs_key DNS pin record]:URL:_urls' \
+'--url=[URL of the public key to publish in the _hs_key DNS pin record]:URL:_default' \
 '--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
-'--txt[Output the HSPIN:SHA3-256:<fingerprint>:<url> DNS TXT record (requires --url)]' \
+'--txt[Output the HSPIN\:SHA3-256\:<fingerprint>\:<url> DNS TXT record (requires --url)]' \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (view-key)
@@ -101,8 +104,8 @@ _arguments "${_arguments_options[@]}" : \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (help)

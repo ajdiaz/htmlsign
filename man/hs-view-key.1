@@ -6,7 +6,10 @@ view\-key \- Display information about a key file
 .SH SYNOPSIS
 \fBview\-key\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Display information about a key file
+Unlock a key file (default ~/.local/share/hs/keys/default.hskey, override
+with \-k) and print its algorithm variants, fingerprint, and path, followed
+by the armored public key. The passphrase is prompted unless
+\-\-no\-passphrase or \-\-passphrase\-file is given.
 .SH OPTIONS
 .TP
 \fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
@@ -19,4 +22,4 @@ Use an empty passphrase (no prompt)
 Read the passphrase from a file (first line)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)

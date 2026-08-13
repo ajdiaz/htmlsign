@@ -1,19 +1,29 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH hs 1  "hs " 
+.TH hs 1  "hs 0.1.0" 
 .SH NAME
 hs \- Sign and verify blocks of HTML with post\-quantum cryptography
 .SH SYNOPSIS
-\fBhs\fR [\fB\-n\fR|\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+\fBhs\fR [\fB\-n\fR|\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Sign and verify blocks of HTML with post\-quantum cryptography
+Sign and verify blocks of HTML (SGML/XML in general) with post\-quantum cryptography.
+.PP
+hs embeds a self\-contained, post\-quantum signature into a data\-hs\-signature
+attribute on matching HTML blocks, so content can be verified after it has
+crossed the network — a TLS connection authenticates the endpoint, but the
+served content itself is bound to the signature. Verification works out of
+the box because the public keys are embedded in the signature; remote
+verification pins the key via the _hs_key.<host> DNS record.
 .SH OPTIONS
 .TP
 \fB\-n\fR, \fB\-\-dry\-run\fR
 Do nothing, print dry\-run message
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
 .SH SUBCOMMANDS
 .TP
 hs\-gen\-key(1)
@@ -33,3 +43,5 @@ Display information about a key file
 .TP
 hs\-help(1)
 Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0

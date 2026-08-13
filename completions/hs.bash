@@ -59,7 +59,7 @@ _hs() {
 
     case "${cmd}" in
         hs)
-            opts="-n -h --dry-run --help gen-key sign verify export view-key help"
+            opts="-n -h -V --dry-run --help --version gen-key sign verify export view-key help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -73,7 +73,7 @@ _hs() {
             return 0
             ;;
         hs__subcmd__export)
-            opts="-k -o -n -h --key --output --txt --url --no-passphrase --passphrase-file --dry-run --help"
+            opts="-k -o -n -h --key --output --url --txt --no-passphrase --passphrase-file --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -92,6 +92,10 @@ _hs() {
                     return 0
                     ;;
                 -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --url)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
@@ -295,16 +299,16 @@ _hs() {
                 return 0
             fi
             case "${prev}" in
-                --format)
-                    COMPREPLY=( $(compgen -W "text json" -- "${cur}") )
-                    return 0
-                    ;;
                 --key)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 -k)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0
                     ;;
                 --passphrase-file)

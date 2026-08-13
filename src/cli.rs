@@ -19,7 +19,16 @@ pub enum OutputFormat {
 #[derive(Parser)]
 #[command(
     name = "hs",
-    about = "Sign and verify blocks of HTML with post-quantum cryptography"
+    version,
+    about = "Sign and verify blocks of HTML with post-quantum cryptography",
+    long_about = "Sign and verify blocks of HTML (SGML/XML in general) with post-quantum cryptography.
+
+hs embeds a self-contained, post-quantum signature into a data-hs-signature
+attribute on matching HTML blocks, so content can be verified after it has
+crossed the network — a TLS connection authenticates the endpoint, but the
+served content itself is bound to the signature. Verification works out of
+the box because the public keys are embedded in the signature; remote
+verification pins the key via the _hs_key.<host> DNS record."
 )]
 pub struct Cli {
     /// Print a dry-run message and exit without doing anything.
@@ -39,13 +48,22 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted.
-    #[command(name = "gen-key")]
+    #[command(
+        name = "gen-key",
+        long_about = "Generate an ML-KEM + ML-DSA key pair and store the secret key at the
+given output path (default ~/.local/share/hs/keys/default.hskey), encrypted
+at rest with Argon2id + XChaCha20-Poly1305 and 0600 permissions.
+
+The passphrase is prompted twice (create + confirm) unless --no-passphrase
+or --passphrase-file is given. With --public-key, the armored public key is
+also written to the given path."
+    )]
     GenKey {
         /// Where to write the secret key file.
         #[arg(
             short = 'o',
             long = "output",
-            help = "Output path for the secret key file"
+            help = "Output path for the secret key file (default: ~/.local/share/hs/keys/default.hskey)"
         )]
         output: Option<String>,
         /// Also write the armored public key to this path.
@@ -100,7 +118,19 @@ pub enum Commands {
         argon2_par: u32,
     },
     /// Sign HTML blocks matching a CSS selector.
-    #[command(name = "sign")]
+    #[command(
+        name = "sign",
+        long_about = "Find every element matching SELECTOR (full CSS selectors, e.g.
+div.text, #price, article[data-id=\"42\"]), remove any existing
+data-hs-signature, sign the SHA3-256 digest of the block's canonical
+serialization — whitespace-normalized so signatures survive server-side
+minification — and inject the new signature attribute.
+
+The output is written to --output, or back over FILE in place. The secret
+key defaults to ~/.local/share/hs/keys/default.hskey (override with -k);
+its passphrase is prompted unless --no-passphrase or --passphrase-file is
+given."
+    )]
     Sign {
         /// Input HTML file.
         #[arg(value_name = "FILE", help = "HTML file to sign")]
@@ -125,11 +155,32 @@ pub enum Commands {
         )]
         passphrase_file: Option<String>,
         /// Write the signed HTML to this path instead of overwriting the input.
-        #[arg(short = 'o', long = "output", help = "Output HTML file path")]
+        #[arg(
+            short = 'o',
+            long = "output",
+            help = "Output HTML file path (default: overwrite FILE)"
+        )]
         output: Option<String>,
     },
     /// Verify signed blocks in an HTML file.
-    #[command(name = "verify")]
+    #[command(
+        name = "verify",
+        long_about = "Locate every block carrying a data-hs-signature attribute, recompute its
+canonical bytes, and check the embedded ML-DSA signature. The command exits
+non-zero if any block is invalid or, when a key is expected, mismatches it.
+
+With -k, every block must additionally be signed by exactly the given
+public key — an armored key.pub or a .hskey secret key file (unlocked with
+the passphrase) — defeating re-signing of altered content.
+
+When FILE is an http:// or https:// URL, the document is fetched over
+HTTPS (validating the TLS certificate unless --ignore-tls-errors is given)
+and the signing key is resolved from the _hs_key.<host> DNS pin record,
+downloading the key and checking its SHA3-256 fingerprint against the pin.
+
+--format json emits a machine-readable report (ok, total, verified, key
+origin, and per-block results) instead of the human-readable text report."
+    )]
     Verify {
         /// Input HTML file, or an http(s) URL to fetch and verify.
         #[arg(value_name = "FILE|URL", help = "HTML file or URL to verify")]
@@ -169,7 +220,19 @@ pub enum Commands {
         passphrase_file: Option<String>,
     },
     /// Export the public key of a key file (armored, or a DNS pin record).
-    #[command(name = "export")]
+    #[command(
+        name = "export",
+        long_about = "Unlock a key file and print its armored public key
+(-----BEGIN HS PUBLIC KEY-----) for out-of-band distribution or for serving
+at a well-known URL. The private key is never exported — it stays in the
+encrypted .hskey file.
+
+With --txt --url <URL>, emit the DNS pin record instead:
+HSPIN:SHA3-256:<fingerprint>:<url>. Publish that single short line as the
+_hs_key.<host> TXT record and serve the armored public key at <url>;
+remote verification downloads the key and requires its fingerprint to
+match the pin."
+    )]
     Export {
         /// Secret key file.
         #[arg(
@@ -209,7 +272,13 @@ pub enum Commands {
         passphrase_file: Option<String>,
     },
     /// Display information about a key file.
-    #[command(name = "view-key")]
+    #[command(
+        name = "view-key",
+        long_about = "Unlock a key file (default ~/.local/share/hs/keys/default.hskey, override
+with -k) and print its algorithm variants, fingerprint, and path, followed
+by the armored public key. The passphrase is prompted unless
+--no-passphrase or --passphrase-file is given."
+    )]
     ViewKey {
         /// Secret key file.
         #[arg(

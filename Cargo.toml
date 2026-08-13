@@ -10,7 +10,7 @@ keywords = ["html", "signature", "post-quantum", "ml-dsa", "ml-kem", "cli"]
 categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "cargo"] }
 scraper = "0.27"
 html5ever = "0.39"
 ego-tree = "0.11"

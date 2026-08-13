@@ -4,9 +4,18 @@
 .SH NAME
 export \- Export the public key of a key file (armored, or a DNS pin record)
 .SH SYNOPSIS
-\fBexport\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-txt\fR] [\fB\-\-url\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBexport\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-url\fR] [\fB\-\-txt\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Export the public key of a key file (armored, or a DNS pin record)
+Unlock a key file and print its armored public key
+(\-\-\-\-\-BEGIN HS PUBLIC KEY\-\-\-\-\-) for out\-of\-band distribution or for serving
+at a well\-known URL. The private key is never exported — it stays in the
+encrypted .hskey file.
+.PP
+With \-\-txt \-\-url <URL>, emit the DNS pin record instead:
+HSPIN:SHA3\-256:<fingerprint>:<url>. Publish that single short line as the
+_hs_key.<host> TXT record and serve the armored public key at <url>;
+remote verification downloads the key and requires its fingerprint to
+match the pin.
 .SH OPTIONS
 .TP
 \fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
@@ -28,4 +37,4 @@ Use an empty passphrase (no prompt)
 Read the passphrase from a file (first line)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)

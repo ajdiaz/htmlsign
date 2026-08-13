@@ -4,9 +4,23 @@
 .SH NAME
 verify \- Verify signed blocks in an HTML file
 .SH SYNOPSIS
-\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-format\fR \fI<FORMAT>\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
+\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-format\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
 .SH DESCRIPTION
-Verify signed blocks in an HTML file
+Locate every block carrying a data\-hs\-signature attribute, recompute its
+canonical bytes, and check the embedded ML\-DSA signature. The command exits
+non\-zero if any block is invalid or, when a key is expected, mismatches it.
+.PP
+With \-k, every block must additionally be signed by exactly the given
+public key — an armored key.pub or a .hskey secret key file (unlocked with
+the passphrase) — defeating re\-signing of altered content.
+.PP
+When FILE is an http:// or https:// URL, the document is fetched over
+HTTPS (validating the TLS certificate unless \-\-ignore\-tls\-errors is given)
+and the signing key is resolved from the _hs_key.<host> DNS pin record,
+downloading the key and checking its SHA3\-256 fingerprint against the pin.
+.PP
+\-\-format json emits a machine\-readable report (ok, total, verified, key
+origin, and per\-block results) instead of the human\-readable text report.
 .SH OPTIONS
 .TP
 \fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
@@ -17,8 +31,18 @@ Accepts either an armored public key file (`key.pub`) or a `.hskey` secret key f
 \fB\-\-ignore\-tls\-errors\fR
 Skip TLS certificate validation when verifying a URL
 .TP
-\fB\-\-format\fR \fI<FORMAT>\fR
+\fB\-\-format\fR \fI<FORMAT>\fR [default: text]
 Output format: text (default) or json
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+text: Human\-readable text report
+.IP \(bu 2
+json: Machine\-readable JSON report
+.RE
 .TP
 \fB\-\-no\-passphrase\fR
 Use an empty passphrase (no prompt)

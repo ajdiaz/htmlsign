@@ -1,6 +1,6 @@
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_hs_global_optspecs
-    string join \n n/dry-run h/help
+    string join \n n/dry-run h/help V/version
 end
 
 function __fish_hs_needs_command
@@ -25,14 +25,15 @@ function __fish_hs_using_subcommand
 end
 
 complete -c hs -n "__fish_hs_needs_command" -s n -l dry-run -d 'Do nothing, print dry-run message'
-complete -c hs -n "__fish_hs_needs_command" -s h -l help -d 'Print help'
+complete -c hs -n "__fish_hs_needs_command" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c hs -n "__fish_hs_needs_command" -s V -l version -d 'Print version'
 complete -c hs -n "__fish_hs_needs_command" -f -a "gen-key" -d 'Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted'
 complete -c hs -n "__fish_hs_needs_command" -f -a "sign" -d 'Sign HTML blocks matching a CSS selector'
 complete -c hs -n "__fish_hs_needs_command" -f -a "verify" -d 'Verify signed blocks in an HTML file'
 complete -c hs -n "__fish_hs_needs_command" -f -a "export" -d 'Export the public key of a key file (armored, or a DNS pin record)'
 complete -c hs -n "__fish_hs_needs_command" -f -a "view-key" -d 'Display information about a key file'
 complete -c hs -n "__fish_hs_needs_command" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c hs -n "__fish_hs_using_subcommand gen-key" -s o -l output -d 'Output path for the secret key file' -r
+complete -c hs -n "__fish_hs_using_subcommand gen-key" -s o -l output -d 'Output path for the secret key file (default: ~/.local/share/hs/keys/default.hskey)' -r
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -l public-key -d 'Write the armored public key to this path' -r
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -l kem -d 'KEM algorithm variant: ML-KEM-512, ML-KEM-768, ML-KEM-1024' -r
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -l dsa -d 'Digital signature variant: ML-DSA-44, ML-DSA-65, ML-DSA-87' -r
@@ -42,17 +43,18 @@ complete -c hs -n "__fish_hs_using_subcommand gen-key" -l argon2-time -d 'Argon2
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -l argon2-par -d 'Argon2id parallelism / threads (default 1)' -r
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -l no-passphrase -d 'Store the key without a passphrase'
 complete -c hs -n "__fish_hs_using_subcommand gen-key" -s n -l dry-run -d 'Do nothing, print dry-run message'
-complete -c hs -n "__fish_hs_using_subcommand gen-key" -s h -l help -d 'Print help'
+complete -c hs -n "__fish_hs_using_subcommand gen-key" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c hs -n "__fish_hs_using_subcommand sign" -s k -l key -d 'Path to the secret key file (.hskey)' -r
 complete -c hs -n "__fish_hs_using_subcommand sign" -l passphrase-file -d 'Read the passphrase from a file (first line)' -r
-complete -c hs -n "__fish_hs_using_subcommand sign" -s o -l output -d 'Output HTML file path' -r
+complete -c hs -n "__fish_hs_using_subcommand sign" -s o -l output -d 'Output HTML file path (default: overwrite FILE)' -r
 complete -c hs -n "__fish_hs_using_subcommand sign" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand sign" -s n -l dry-run -d 'Do nothing, print dry-run message'
-complete -c hs -n "__fish_hs_using_subcommand sign" -s h -l help -d 'Print help'
+complete -c hs -n "__fish_hs_using_subcommand sign" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s k -l key -d 'Require blocks to be signed with this public key (armored or .hskey)' -r
+complete -c hs -n "__fish_hs_using_subcommand verify" -l format -d 'Output format: text (default) or json' -r -f -a "text\t'Human-readable text report'
+json\t'Machine-readable JSON report'"
 complete -c hs -n "__fish_hs_using_subcommand verify" -l passphrase-file -d 'Read the passphrase from a file (first line)' -r
 complete -c hs -n "__fish_hs_using_subcommand verify" -l ignore-tls-errors -d 'Skip TLS certificate validation when verifying a URL'
-complete -c hs -n "__fish_hs_using_subcommand verify" -l format -d 'Output format: text (default) or json' -r -f -a 'text json'
 complete -c hs -n "__fish_hs_using_subcommand verify" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s n -l dry-run -d 'Do nothing, print dry-run message'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s h -l help -d 'Print help (see more with \'--help\')'
@@ -63,12 +65,12 @@ complete -c hs -n "__fish_hs_using_subcommand export" -l passphrase-file -d 'Rea
 complete -c hs -n "__fish_hs_using_subcommand export" -l txt -d 'Output the HSPIN:SHA3-256:<fingerprint>:<url> DNS TXT record (requires --url)'
 complete -c hs -n "__fish_hs_using_subcommand export" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand export" -s n -l dry-run -d 'Do nothing, print dry-run message'
-complete -c hs -n "__fish_hs_using_subcommand export" -s h -l help -d 'Print help'
+complete -c hs -n "__fish_hs_using_subcommand export" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c hs -n "__fish_hs_using_subcommand view-key" -s k -l key -d 'Path to the secret key file (.hskey)' -r
 complete -c hs -n "__fish_hs_using_subcommand view-key" -l passphrase-file -d 'Read the passphrase from a file (first line)' -r
 complete -c hs -n "__fish_hs_using_subcommand view-key" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand view-key" -s n -l dry-run -d 'Do nothing, print dry-run message'
-complete -c hs -n "__fish_hs_using_subcommand view-key" -s h -l help -d 'Print help'
+complete -c hs -n "__fish_hs_using_subcommand view-key" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "gen-key" -d 'Generate a key pair (ML-KEM + ML-DSA), passphrase-encrypted'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "sign" -d 'Sign HTML blocks matching a CSS selector'
 complete -c hs -n "__fish_hs_using_subcommand help; and not __fish_seen_subcommand_from gen-key sign verify export view-key help" -f -a "verify" -d 'Verify signed blocks in an HTML file'

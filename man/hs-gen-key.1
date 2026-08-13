@@ -6,11 +6,17 @@ gen\-key \- Generate a key pair (ML\-KEM + ML\-DSA), passphrase\-encrypted
 .SH SYNOPSIS
 \fBgen\-key\fR [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-public\-key\fR] [\fB\-\-kem\fR] [\fB\-\-dsa\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-\-argon2\-mem\fR] [\fB\-\-argon2\-time\fR] [\fB\-\-argon2\-par\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Generate a key pair (ML\-KEM + ML\-DSA), passphrase\-encrypted
+Generate an ML\-KEM + ML\-DSA key pair and store the secret key at the
+given output path (default ~/.local/share/hs/keys/default.hskey), encrypted
+at rest with Argon2id + XChaCha20\-Poly1305 and 0600 permissions.
+.PP
+The passphrase is prompted twice (create + confirm) unless \-\-no\-passphrase
+or \-\-passphrase\-file is given. With \-\-public\-key, the armored public key is
+also written to the given path.
 .SH OPTIONS
 .TP
 \fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
-Output path for the secret key file
+Output path for the secret key file (default: ~/.local/share/hs/keys/default.hskey)
 .TP
 \fB\-\-public\-key\fR \fI<PUBLIC_KEY>\fR
 Write the armored public key to this path
@@ -37,4 +43,4 @@ Argon2id time cost / iterations (default 3)
 Argon2id parallelism / threads (default 1)
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)
