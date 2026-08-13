@@ -170,20 +170,40 @@ fn cmd_sign(args: &hs::cli::Commands) -> Result<()> {
 }
 
 fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
-    let Commands::Verify { file, key } = args else {
+    let Commands::Verify {
+        file,
+        key,
+        ignore_tls_errors,
+    } = args
+    else {
         unreachable!()
     };
 
-    let html_input = read_html(file)?;
+    let is_url = hs::net::is_url(file);
+    let html_input = if is_url {
+        eprintln!("Fetching {} ...", file);
+        hs::net::fetch_html(file, *ignore_tls_errors)?
+    } else {
+        read_html(file)?
+    };
     let results = html::verify_blocks(&html_input)
         .with_context(|| format!("verifying blocks in {}", file))?;
 
     let mut ok = true;
-    if let Some(pub_path) = key {
+    let expected = if let Some(pub_path) = key {
         let armored =
             std::fs::read_to_string(pub_path).with_context(|| format!("reading {}", pub_path))?;
-        let expected = keys::unarmor_public_key(&armored)
-            .with_context(|| format!("parsing public key {}", pub_path))?;
+        Some(
+            keys::unarmor_public_key(&armored)
+                .with_context(|| format!("parsing public key {}", pub_path))?,
+        )
+    } else if is_url {
+        let host = hs::net::host_of(file)?;
+        Some(hs::net::public_key_from_dns(&host)?)
+    } else {
+        None
+    };
+    if let Some(expected) = expected {
         for r in &results {
             if r.fingerprint != expected.fingerprint {
                 println!(

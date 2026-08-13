@@ -65,13 +65,21 @@
 //!
 //! ## `verify`
 //!
-//! `hs verify FILE [-k PUBLIC_KEY_FILE]`
+//! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors]`
 //!
 //! Locates every block with a `data-hs-signature` attribute, recomputes
 //! its canonical bytes, and checks the embedded ML-DSA signature. Exits
 //! non-zero if any block fails. With `-k`/`--key`, blocks are additionally
 //! required to have been signed by exactly the given armored public key
 //! (defeating re-signing of altered content with a different key).
+//!
+//! When the input is an `http://` or `https://` URL, the document is
+//! fetched over HTTPS — verifying the TLS certificate unless
+//! `--ignore-tls-errors` is given — and the signing public key is resolved
+//! automatically from the DNS TXT record `_hs_key.<host>`, which holds the
+//! armored public key. This closes the gap left by TLS: the connection is
+//! authenticated, and the *content* is now pinned to the key published in
+//! DNS.
 //!
 //! ## `view-key`
 //!
@@ -115,3 +123,4 @@ pub mod crypto;
 pub mod format;
 pub mod html;
 pub mod keys;
+pub mod net;

@@ -122,8 +122,8 @@ pub enum Commands {
     /// Verify signed blocks in an HTML file.
     #[command(name = "verify")]
     Verify {
-        /// Input HTML file.
-        #[arg(value_name = "FILE", help = "HTML file to verify")]
+        /// Input HTML file, or an http(s) URL to fetch and verify.
+        #[arg(value_name = "FILE|URL", help = "HTML file or URL to verify")]
         file: String,
         /// Restrict verification to a specific public key (armored file).
         #[arg(
@@ -132,6 +132,12 @@ pub enum Commands {
             help = "Require blocks to be signed with this armored public key"
         )]
         key: Option<String>,
+        /// Do not validate the TLS certificate when fetching a URL.
+        #[arg(
+            long = "ignore-tls-errors",
+            help = "Skip TLS certificate validation when verifying a URL"
+        )]
+        ignore_tls_errors: bool,
     },
     /// Display information about a key file.
     #[command(name = "view-key")]

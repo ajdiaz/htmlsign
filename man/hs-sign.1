@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH sign 1  "sign " 
+.SH NAME
+sign \- Sign HTML blocks matching a CSS selector
+.SH SYNOPSIS
+\fBsign\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> <\fISELECTOR\fR> 
+.SH DESCRIPTION
+Sign HTML blocks matching a CSS selector
+.SH OPTIONS
+.TP
+\fB\-k\fR, \fB\-\-key\fR \fI<KEY>\fR
+Path to the secret key file (.hskey)
+.TP
+\fB\-\-no\-passphrase\fR
+Use an empty passphrase (no prompt)
+.TP
+\fB\-\-passphrase\-file\fR \fI<PASSPHRASE_FILE>\fR
+Read the passphrase from a file (first line)
+.TP
+\fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
+Output HTML file path
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIFILE\fR>
+HTML file to sign
+.TP
+<\fISELECTOR\fR>
+CSS selector of the block(s) to sign

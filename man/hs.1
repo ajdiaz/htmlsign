@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH hs 1  "hs " 
+.SH NAME
+hs \- Sign and verify blocks of HTML with post\-quantum cryptography
+.SH SYNOPSIS
+\fBhs\fR [\fB\-n\fR|\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Sign and verify blocks of HTML with post\-quantum cryptography
+.SH OPTIONS
+.TP
+\fB\-n\fR, \fB\-\-dry\-run\fR
+Do nothing, print dry\-run message
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+hs\-gen\-key(1)
+Generate a key pair (ML\-KEM + ML\-DSA), passphrase\-encrypted
+.TP
+hs\-sign(1)
+Sign HTML blocks matching a CSS selector
+.TP
+hs\-verify(1)
+Verify signed blocks in an HTML file
+.TP
+hs\-view\-key(1)
+Display information about a key file
+.TP
+hs\-help(1)
+Print this message or the help of the given subcommand(s)

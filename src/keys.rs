@@ -158,52 +158,51 @@ pub fn armor_public_key(info: &KeyInfo) -> String {
 }
 
 /// Parse an armored public key into its components.
+///
+/// The BEGIN and END markers may be surrounded by arbitrary surrounding
+/// text, and the body may be split across any amount of whitespace (for
+/// instance when published in a DNS TXT record): after the BEGIN marker
+/// the first two whitespace-separated tokens are the algorithm names and
+/// the remaining tokens are the concatenated base64 body.
 pub fn unarmor_public_key(data: &str) -> Result<KeyInfo, KeyError> {
-    let mut lines = data.lines();
-    let begin = lines
-        .next()
-        .ok_or_else(|| KeyError::InvalidArmor("empty input".into()))?;
-    if begin.trim() != ARMOR_BEGIN {
-        return Err(KeyError::InvalidArmor("missing BEGIN marker".into()));
-    }
-    let algs = lines
-        .next()
-        .ok_or_else(|| KeyError::InvalidArmor("missing algorithm line".into()))?;
-    let mut parts = algs.split_whitespace();
+    let begin = data
+        .find(ARMOR_BEGIN)
+        .ok_or_else(|| KeyError::InvalidArmor("missing BEGIN marker".into()))?;
+    let rest = &data[begin + ARMOR_BEGIN.len()..];
+    let end = rest
+        .find(ARMOR_END)
+        .ok_or_else(|| KeyError::InvalidArmor("missing END marker".into()))?;
+    let body = &rest[..end];
+
+    let mut parts = body.split_whitespace();
     let kem_name = parts
         .next()
-        .ok_or_else(|| KeyError::InvalidArmor("missing KEM algorithm on header line".into()))?;
+        .ok_or_else(|| KeyError::InvalidArmor("missing KEM algorithm".into()))?;
     let dsa_name = parts
         .next()
-        .ok_or_else(|| KeyError::InvalidArmor("missing DSA algorithm on header line".into()))?;
+        .ok_or_else(|| KeyError::InvalidArmor("missing DSA algorithm".into()))?;
     let kem_variant = KemVariant::parse(kem_name)
         .ok_or_else(|| KeyError::InvalidArmor(format!("unknown KEM variant {}", kem_name)))?;
     let dsa_variant = DsaVariant::parse(dsa_name)
         .ok_or_else(|| KeyError::InvalidArmor(format!("unknown DSA variant {}", dsa_name)))?;
 
-    let mut b64 = String::new();
-    for line in lines {
-        if line.trim() == ARMOR_END {
-            let payload = base64::engine::general_purpose::STANDARD
-                .decode(&b64)
-                .map_err(|e| KeyError::InvalidArmor(format!("invalid base64 body: {}", e)))?;
-            let kem_len = kem_variant.public_key_len();
-            let dsa_len = dsa_variant.public_key_len();
-            if payload.len() != kem_len + dsa_len {
-                return Err(KeyError::InvalidArmor("payload length mismatch".into()));
-            }
-            let kem_public_key = payload[..kem_len].to_vec();
-            let dsa_public_key = payload[kem_len..].to_vec();
-            let fingerprint = keyfile::fingerprint(&kem_public_key, &dsa_public_key);
-            return Ok(KeyInfo {
-                kem_variant,
-                dsa_variant,
-                kem_public_key,
-                dsa_public_key,
-                fingerprint,
-            });
-        }
-        b64.push_str(line.trim());
+    let b64: String = parts.collect();
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .map_err(|e| KeyError::InvalidArmor(format!("invalid base64 body: {}", e)))?;
+    let kem_len = kem_variant.public_key_len();
+    let dsa_len = dsa_variant.public_key_len();
+    if payload.len() != kem_len + dsa_len {
+        return Err(KeyError::InvalidArmor("payload length mismatch".into()));
     }
-    Err(KeyError::InvalidArmor("missing END marker".into()))
+    let kem_public_key = payload[..kem_len].to_vec();
+    let dsa_public_key = payload[kem_len..].to_vec();
+    let fingerprint = keyfile::fingerprint(&kem_public_key, &dsa_public_key);
+    Ok(KeyInfo {
+        kem_variant,
+        dsa_variant,
+        kem_public_key,
+        dsa_public_key,
+        fingerprint,
+    })
 }

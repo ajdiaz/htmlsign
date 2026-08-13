@@ -1,0 +1,40 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH gen-key 1  "gen-key " 
+.SH NAME
+gen\-key \- Generate a key pair (ML\-KEM + ML\-DSA), passphrase\-encrypted
+.SH SYNOPSIS
+\fBgen\-key\fR [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-public\-key\fR] [\fB\-\-kem\fR] [\fB\-\-dsa\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-\-argon2\-mem\fR] [\fB\-\-argon2\-time\fR] [\fB\-\-argon2\-par\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Generate a key pair (ML\-KEM + ML\-DSA), passphrase\-encrypted
+.SH OPTIONS
+.TP
+\fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR
+Output path for the secret key file
+.TP
+\fB\-\-public\-key\fR \fI<PUBLIC_KEY>\fR
+Write the armored public key to this path
+.TP
+\fB\-\-kem\fR \fI<KEM>\fR [default: ML\-KEM\-768]
+KEM algorithm variant: ML\-KEM\-512, ML\-KEM\-768, ML\-KEM\-1024
+.TP
+\fB\-\-dsa\fR \fI<DSA>\fR [default: ML\-DSA\-65]
+Digital signature variant: ML\-DSA\-44, ML\-DSA\-65, ML\-DSA\-87
+.TP
+\fB\-\-no\-passphrase\fR
+Store the key without a passphrase
+.TP
+\fB\-\-passphrase\-file\fR \fI<PASSPHRASE_FILE>\fR
+Read the passphrase from a file (first line)
+.TP
+\fB\-\-argon2\-mem\fR \fI<ARGON2_MEM>\fR [default: 65536]
+Argon2id memory cost in KiB (default 65536 ~= 64 MiB)
+.TP
+\fB\-\-argon2\-time\fR \fI<ARGON2_TIME>\fR [default: 3]
+Argon2id time cost / iterations (default 3)
+.TP
+\fB\-\-argon2\-par\fR \fI<ARGON2_PAR>\fR [default: 1]
+Argon2id parallelism / threads (default 1)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
