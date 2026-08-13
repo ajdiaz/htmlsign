@@ -1,0 +1,32 @@
+[package]
+name = "hs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Sign and verify blocks of HTML/SGML/XML with post-quantum cryptography"
+repository = "https://github.com/ajdiaz/htmlsign"
+homepage = "https://github.com/ajdiaz/htmlsign"
+keywords = ["html", "signature", "post-quantum", "ml-dsa", "ml-kem", "cli"]
+categories = ["command-line-utilities", "cryptography"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+scraper = "0.27"
+html5ever = "0.39"
+ego-tree = "0.11"
+tendril = "0.5"
+ml-kem = { version = "0.3", features = ["getrandom", "zeroize"] }
+ml-dsa = "0.1"
+chacha20poly1305 = "0.11"
+rand = "0.8"
+sha3 = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+anyhow = "1"
+thiserror = "2"
+zeroize = { version = "1", features = ["zeroize_derive"] }
+dirs = "5"
+rpassword = "7"
+
+[dev-dependencies]
+tempfile = "3"
