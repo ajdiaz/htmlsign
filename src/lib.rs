@@ -86,9 +86,10 @@
 //! fetched over HTTPS — verifying the TLS certificate unless
 //! `--ignore-tls-errors` is given — and the signing public key is resolved
 //! automatically from the DNS TXT record `_hs_key.<host>`, which holds the
-//! armored public key. This closes the gap left by TLS: the connection is
-//! authenticated, and the *content* is now pinned to the key published in
-//! DNS.
+//! public key in the ASCII85 TXT format produced by `export --txt`
+//! (legacy armored records are also accepted). This closes the gap left by
+//! TLS: the connection is authenticated, and the *content* is now pinned
+//! to the key published in DNS.
 //!
 //! ## `view-key`
 //!
@@ -101,16 +102,20 @@
 //! `hs export [-k PATH] [-o PATH] [--txt] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Unlocks a key file and outputs its **armored public key**
-//! (`-----BEGIN HS PUBLIC KEY-----` block). This is exactly the payload to
-//! publish in the `_hs_key.<host>` DNS TXT record that remote verification
-//! reads. The secret key is never exported — it stays in the encrypted
-//! `.hskey` file.
+//! (`-----BEGIN HS PUBLIC KEY-----` block) for out-of-band distribution.
+//! The secret key is never exported — it stays in the encrypted `.hskey`
+//! file.
 //!
-//! With `--txt`, the armor is first collapsed to a single line and then
+//! With `--txt`, the public key is emitted instead in the compact ASCII85
+//! DNS format
+//! (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>` — no PEM markers) and
 //! split into DNS TXT character-strings of at most 255 bytes each, one per
-//! line, so it can be pasted directly as the strings of a TXT record. The
-//! record's strings are concatenated on lookup, and the parser tolerates
-//! the split (see [`keys::unarmor_public_key`]).
+//! line, ready to paste as the strings of the `_hs_key.<host>` TXT record.
+//! ASCII85 (20% overhead) keeps the default ML-KEM-768 + ML-DSA-65 record
+//! at ~3946 bytes, within the practical 4096-byte DNS TXT limit that
+//! base64 armor (4329 bytes) exceeds. The record's strings are concatenated
+//! on lookup, and the parser tolerates the split and whitespace (see
+//! [`keys::parse_public_key`]).
 //!
 //! # Global flags
 //!
@@ -145,10 +150,13 @@
 //! - **XChaCha20-Poly1305** (RFC 8439) via `chacha20poly1305`.
 //! - **Argon2id** (RFC 9106) via the `argon2` crate.
 //! - **SHA3-256** (FIPS 202) via the `sha3` crate.
+//! - **ASCII85** public-key encoding for compact DNS TXT records, provided
+//!   by the self-contained [`ascii85`] module.
 //!
 //! The `pqcrypto` umbrella crate is deliberately avoided
 //! (RUSTSEC-2026-0164, unmaintained).
 
+pub mod ascii85;
 pub mod cli;
 pub mod crypto;
 pub mod format;

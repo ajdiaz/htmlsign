@@ -4,6 +4,7 @@
 //! [`crate::crypto::keyfile`]). Public keys can be exported as an armored
 //! `-----BEGIN HS PUBLIC KEY-----` block for out-of-band distribution.
 
+use crate::ascii85;
 use crate::crypto::keyfile::{self, KdfParams, UnlockedKey};
 use crate::crypto::{kem, keygen, sign, CryptoError, DsaVariant, KemVariant};
 use base64::Engine;
@@ -15,6 +16,8 @@ use zeroize::Zeroize;
 pub const ARMOR_BEGIN: &str = "-----BEGIN HS PUBLIC KEY-----";
 /// Footer marker for armored public keys.
 pub const ARMOR_END: &str = "-----END HS PUBLIC KEY-----";
+/// Marker prefix of the ASCII85 DNS TXT public-key format.
+pub const TXT_KEY_PREFIX: &str = "HS85";
 /// Default file name for the default signing key.
 pub const DEFAULT_KEY_FILE: &str = "default.hskey";
 
@@ -24,6 +27,9 @@ pub enum KeyError {
     /// The armored public key is malformed.
     #[error("invalid armored public key: {0}")]
     InvalidArmor(String),
+    /// The ASCII85 DNS public-key payload is malformed.
+    #[error("invalid ASCII85 public key: {0}")]
+    InvalidAscii85(String),
     /// A cryptographic operation failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
@@ -138,15 +144,15 @@ fn info_from_unlocked(unlocked: &UnlockedKey) -> KeyInfo {
 
 /// Extract the public key information from raw key file bytes.
 ///
-/// Accepts either an armored public key (`-----BEGIN HS PUBLIC KEY-----`,
-/// e.g. as read from a DNS TXT record) or a passphrase-encrypted `.hskey`
-/// secret key file, detecting the format from the contents. The secret
-/// key file is decrypted with `passphrase` before its public half is
-/// returned.
+/// Accepts an armored public key (`-----BEGIN HS PUBLIC KEY-----`), an
+/// ASCII85 DNS TXT public key (see [`ascii85_public_key`]), or a
+/// passphrase-encrypted `.hskey` secret key file, detecting the format
+/// from the contents. The secret key file is decrypted with `passphrase`
+/// before its public half is returned.
 pub fn public_key_from_bytes(bytes: &[u8], passphrase: &str) -> Result<KeyInfo, KeyError> {
     if let Ok(text) = std::str::from_utf8(bytes) {
-        if text.contains(ARMOR_BEGIN) {
-            return unarmor_public_key(text);
+        if is_public_key_text(text) {
+            return parse_public_key(text);
         }
     }
     let mut unlocked = keyfile::from_bytes(bytes, passphrase)?;
@@ -165,14 +171,110 @@ pub fn load_public_key(path: &Path, passphrase: &str) -> Result<KeyInfo, KeyErro
     public_key_from_bytes(&bytes, passphrase)
 }
 
-/// Return true if the file at `path` is an armored public key.
+/// Return true if `text` is a textual public key payload.
 ///
-/// Used to decide whether a passphrase is needed: armored public keys
-/// carry no secret material and are unlocked without one, while `.hskey`
-/// secret key files require the passphrase.
+/// That is, either an armored public key (carrying the BEGIN marker) or an
+/// ASCII85 DNS TXT public key (starting with [`TXT_KEY_PREFIX`]).
+fn is_public_key_text(text: &str) -> bool {
+    text.contains(ARMOR_BEGIN) || text.trim_start().starts_with(TXT_KEY_PREFIX)
+}
+
+/// Return true if the file at `path` is a textual public key.
+///
+/// Both the armored `-----BEGIN HS PUBLIC KEY-----` form and the ASCII85
+/// DNS TXT form (see [`ascii85_public_key`]) are detected. Used to decide
+/// whether a passphrase is needed: textual public keys carry no secret
+/// material and are unlocked without one, while `.hskey` secret key files
+/// require the passphrase.
 pub fn is_armored_key(path: &Path) -> Result<bool, KeyError> {
     let bytes = std::fs::read(path)?;
-    Ok(std::str::from_utf8(&bytes).is_ok_and(|t| t.contains(ARMOR_BEGIN)))
+    Ok(std::str::from_utf8(&bytes).is_ok_and(is_public_key_text))
+}
+
+/// Parse a textual public key payload into its components.
+///
+/// Accepts either the ASCII85 DNS TXT format
+/// (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>`, used by DNS records)
+/// or the legacy armored `-----BEGIN HS PUBLIC KEY-----` format. The
+/// ASCII85 form carries no PEM markers.
+pub fn parse_public_key(data: &str) -> Result<KeyInfo, KeyError> {
+    if data.trim_start().starts_with(TXT_KEY_PREFIX) {
+        unascii85_public_key(data)
+    } else {
+        unarmor_public_key(data)
+    }
+}
+
+/// Encode a public key in the ASCII85 DNS TXT format.
+///
+/// The output is a single line of the form
+/// `HS85:ML-KEM-768:ML-DSA-65:<ascii85(kem_pk || dsa_pk)>` with no PEM
+/// markers. Because the key material is incompressible, ASCII85 (20%
+/// overhead) is used instead of compression, keeping the record under the
+/// practical 4096-byte DNS TXT limit for the default key variants
+/// (3136 bytes → 3945 characters including the header).
+pub fn ascii85_public_key(info: &KeyInfo) -> String {
+    let mut payload = Vec::with_capacity(info.kem_public_key.len() + info.dsa_public_key.len());
+    payload.extend_from_slice(&info.kem_public_key);
+    payload.extend_from_slice(&info.dsa_public_key);
+    format!(
+        "{}:{}:{}:{}",
+        TXT_KEY_PREFIX,
+        info.kem_variant.as_str(),
+        info.dsa_variant.as_str(),
+        ascii85::encode(&payload)
+    )
+}
+
+/// Parse an ASCII85 DNS TXT public key.
+///
+/// The payload must start with [`TXT_KEY_PREFIX`] followed by
+/// `:<KEM>:<DSA>:<ascii85 body>`. Leading/trailing whitespace and any
+/// whitespace inside the body (inserted when TXT character-strings are
+/// pasted and re-joined) are tolerated. The body may contain the `:`
+/// character, so only the first three `:` separators are consumed.
+pub fn unascii85_public_key(data: &str) -> Result<KeyInfo, KeyError> {
+    let rest = data
+        .trim()
+        .strip_prefix(TXT_KEY_PREFIX)
+        .ok_or_else(|| KeyError::InvalidAscii85("missing HS85 prefix".into()))?
+        .strip_prefix(':')
+        .ok_or_else(|| KeyError::InvalidAscii85("missing KEM algorithm".into()))?;
+    let mut parts = rest.splitn(3, ':');
+    let kem_name = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| KeyError::InvalidAscii85("missing KEM algorithm".into()))?;
+    let dsa_name = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| KeyError::InvalidAscii85("missing DSA algorithm".into()))?;
+    let encoded = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| KeyError::InvalidAscii85("missing key body".into()))?;
+
+    let kem_variant = KemVariant::parse(kem_name)
+        .ok_or_else(|| KeyError::InvalidAscii85(format!("unknown KEM variant {}", kem_name)))?;
+    let dsa_variant = DsaVariant::parse(dsa_name)
+        .ok_or_else(|| KeyError::InvalidAscii85(format!("unknown DSA variant {}", dsa_name)))?;
+
+    let payload = ascii85::decode(encoded).map_err(|e| KeyError::InvalidAscii85(e.to_string()))?;
+    let kem_len = kem_variant.public_key_len();
+    let dsa_len = dsa_variant.public_key_len();
+    if payload.len() != kem_len + dsa_len {
+        return Err(KeyError::InvalidAscii85("payload length mismatch".into()));
+    }
+    let kem_public_key = payload[..kem_len].to_vec();
+    let dsa_public_key = payload[kem_len..].to_vec();
+    let fingerprint = keyfile::fingerprint(&kem_public_key, &dsa_public_key);
+    Ok(KeyInfo {
+        kem_variant,
+        dsa_variant,
+        kem_public_key,
+        dsa_public_key,
+        fingerprint,
+    })
 }
 
 /// Armor a public key for distribution.
@@ -322,5 +424,75 @@ mod tests {
     fn public_key_from_bytes_garbage_fails() {
         let err = public_key_from_bytes(b"garbage", "").unwrap_err();
         assert!(err.to_string().contains("key file"));
+    }
+
+    #[test]
+    fn ascii85_public_key_round_trips() {
+        let (_secret, armor) = sample_key();
+        let info = unarmor_public_key(&armor).unwrap();
+        let encoded = ascii85_public_key(&info);
+        assert!(encoded.starts_with("HS85:ML-KEM-768:ML-DSA-65:"));
+        let decoded = unascii85_public_key(&encoded).unwrap();
+        assert_eq!(decoded.fingerprint, info.fingerprint);
+        assert_eq!(decoded.kem_public_key, info.kem_public_key);
+        assert_eq!(decoded.dsa_public_key, info.dsa_public_key);
+    }
+
+    #[test]
+    fn ascii85_public_key_fits_dns_txt_limit() {
+        let (_secret, armor) = sample_key();
+        let info = unarmor_public_key(&armor).unwrap();
+        let encoded = ascii85_public_key(&info);
+        assert!(
+            encoded.len() <= 4096,
+            "default key TXT record must fit in 4096 bytes, got {}",
+            encoded.len()
+        );
+    }
+
+    #[test]
+    fn unascii85_public_key_tolerates_split_strings() {
+        let (_secret, armor) = sample_key();
+        let info = unarmor_public_key(&armor).unwrap();
+        let encoded = ascii85_public_key(&info);
+        let split: String = encoded
+            .chars()
+            .enumerate()
+            .flat_map(|(i, c)| {
+                if i > 0 && i % 255 == 0 {
+                    Vec::from(['\n', c])
+                } else {
+                    Vec::from([c])
+                }
+            })
+            .collect();
+        let decoded = unascii85_public_key(&split).unwrap();
+        assert_eq!(decoded.fingerprint, info.fingerprint);
+    }
+
+    #[test]
+    fn parse_public_key_handles_both_formats() {
+        let (_secret, armor) = sample_key();
+        let info_armor = parse_public_key(&armor).unwrap();
+        let info_ascii = parse_public_key(&ascii85_public_key(&info_armor)).unwrap();
+        assert_eq!(info_armor.fingerprint, info_ascii.fingerprint);
+    }
+
+    #[test]
+    fn public_key_from_bytes_accepts_ascii85_text() {
+        let (secret, armor) = sample_key();
+        let info = unarmor_public_key(&armor).unwrap();
+        let encoded = ascii85_public_key(&info);
+        let from_text = public_key_from_bytes(encoded.as_bytes(), "").unwrap();
+        let from_secret = public_key_from_bytes(&secret, "hunter2").unwrap();
+        assert_eq!(from_text.fingerprint, from_secret.fingerprint);
+    }
+
+    #[test]
+    fn unascii85_public_key_rejects_garbage() {
+        let err = unascii85_public_key("HS85:ML-KEM-768:ML-DSA-65:!!").unwrap_err();
+        assert!(err.to_string().contains("ASCII85"));
+        let err = unascii85_public_key("nope").unwrap_err();
+        assert!(err.to_string().contains("missing HS85 prefix"));
     }
 }

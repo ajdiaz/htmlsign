@@ -151,7 +151,7 @@ pub enum Commands {
         )]
         passphrase_file: Option<String>,
     },
-    /// Export the armored public key of a key file (for DNS TXT records).
+    /// Export the public key of a key file (armored, or ASCII85 for DNS TXT).
     #[command(name = "export")]
     Export {
         /// Secret key file.
@@ -161,17 +161,17 @@ pub enum Commands {
             help = "Path to the secret key file (.hskey)"
         )]
         key: Option<String>,
-        /// Write the armored public key to this file instead of stdout.
+        /// Write the public key to this file instead of stdout.
         #[arg(
             short = 'o',
             long = "output",
-            help = "Write the armored public key to this file"
+            help = "Write the public key to this file"
         )]
         output: Option<String>,
-        /// Split the armor into DNS TXT character-strings (max 255 bytes each).
+        /// Emit the ASCII85 public key split into DNS TXT character-strings.
         #[arg(
             long = "txt",
-            help = "Output the armor split into DNS TXT character-strings"
+            help = "Output the ASCII85 public key as DNS TXT character-strings (max 255 bytes each)"
         )]
         txt: bool,
         /// Use an empty passphrase (no prompt).

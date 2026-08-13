@@ -156,16 +156,17 @@ When given a URL, `hs`:
    `_hs_key.example.org` and requires every signed block to match that
    key's fingerprint.
 
-Publish the armored public key from `hs gen-key --public-key key.pub` as a
-TXT record at `_hs_key.<your-domain>`. The record may be split across DNS
+Publish the public key from `hs export --txt` as a TXT record at
+`_hs_key.<your-domain>`. The record may be split across DNS
 character-strings — `hs` stitches them back together. This closes the gap
 TLS leaves open: TLS authenticates the *endpoint*, the `_hs_key` record pins
 the *content*.
 
 ### 📤 Exporting a key for DNS
 
-Export the armored public key of an existing key file (for the TXT record)
-without regenerating anything:
+Export the public key of an existing key file (for the TXT record) without
+regenerating anything. Without `--txt`, the armored form is printed for
+out-of-band distribution:
 
 ```bash
 $ hs export -k ~/.local/share/hs/keys/default.hskey
@@ -176,12 +177,15 @@ ML-KEM-768 ML-DSA-65
 ```
 
 Write it to a file with `-o`, or print it pre-split into DNS TXT
-character-strings (≤255 bytes each, one per line) with `--txt`:
+character-strings (≤255 bytes each, one per line) with `--txt`. The `--txt`
+form uses the compact ASCII85 encoding (no PEM markers), so the whole record
+stays under DNS's practical 4096-byte limit — the default ML-KEM-768 +
+ML-DSA-65 key fits in ~3946 bytes, while base64 armor would need 4329:
 
 ```bash
 $ hs export -k key.hskey --txt
------BEGIN HS PUBLIC KEY----- ML-KEM-768 ML-DSA-65 OXIeM9t6wfQ...
-...
+HS85:ML-KEM-768:ML-DSA-65:9jqo^F*2M7/cQfB.D@-C>O5,&@e'R...
+...   (255 bytes per line)
 ```
 
 Paste each line as the character-strings of the `_hs_key.<host>` TXT record.
@@ -254,6 +258,12 @@ cargo fmt --check
   content, attributes, or structure still fails verification. Whitespace
   inside `<pre>`, `<textarea>`, `<script>`, and `<style>` is preserved
   verbatim because it is semantically significant.
+- **DNS-friendly keys** 🌐: `export --txt` publishes the public key in a
+  compact ASCII85 encoding (`HS85:<KEM>:<DSA>:<ascii85(keys)>`, no PEM
+  markers) so the whole `_hs_key.<host>` TXT record stays under the
+  practical 4096-byte limit — ~3946 bytes for the default key, versus 4329
+  with base64 armor. (PQ public keys are incompressible, so ASCII85's 20%
+  overhead beats any compression.)
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.
 
@@ -264,6 +274,7 @@ src/
   lib.rs        crate-level API documentation
   cli.rs        clap CLI definitions
   crypto/       ML-KEM, ML-DSA, symmetric primitives, key file format
+  ascii85.rs    compact Base85 encoding for DNS TXT public keys
   format.rs     signature attribute encoding/parsing
   html.rs       HTML parsing, signing, verification, report rendering
   keys.rs       key generation, storage, public key armor

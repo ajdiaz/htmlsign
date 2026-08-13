@@ -262,7 +262,7 @@ fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
     let armored = keys::armor_public_key(&unlocked.info);
 
     let text = if *txt {
-        hs::net::txt_chunks(&armored).join("\n") + "\n"
+        hs::net::txt_chunks(&keys::ascii85_public_key(&unlocked.info)).join("\n") + "\n"
     } else {
         armored
     };
@@ -270,7 +270,11 @@ fn cmd_export(args: &hs::cli::Commands) -> Result<()> {
     match output {
         Some(out_path) => {
             std::fs::write(out_path, &text).with_context(|| format!("writing {}", out_path))?;
-            println!("Exported (armored public key): {}", out_path);
+            if *txt {
+                println!("Exported (ASCII85 public key for DNS TXT): {}", out_path);
+            } else {
+                println!("Exported (armored public key): {}", out_path);
+            }
             println!("  fingerprint: {}", unlocked.info.fingerprint);
         }
         None => print!("{}", text),

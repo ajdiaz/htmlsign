@@ -5,10 +5,13 @@
 //! TLS certificate unless `--ignore-tls-errors` is given — and the signing
 //! public key is resolved from the DNS TXT record `_hs_key.example.org`.
 //!
-//! The DNS record holds the armored public key produced by
-//! [`keys::armor_public_key`]; multiple TXT strings within a record are
-//! concatenated, so the armor may be split across the DNS character-string
-//! boundaries.
+//! The DNS record holds the public key in the compact ASCII85 TXT format
+//! produced by `hs export --txt`
+//! (`HS85:<KEM>:<DSA>:<ascii85(kem_pk || dsa_pk)>`, no PEM markers).
+//! Multiple TXT character-strings within a record are concatenated, so the
+//! payload may be split across the DNS 255-byte character-string
+//! boundaries. Legacy records holding the armored
+//! `-----BEGIN HS PUBLIC KEY-----` block are still accepted.
 
 use crate::keys;
 use crate::keys::KeyInfo;
@@ -158,15 +161,17 @@ pub fn dns_txt(name: &str) -> Result<Vec<String>, NetError> {
     })
 }
 
-/// Resolve the armored `hs` public key for `host` via the DNS TXT record
+/// Resolve the `hs` public key for `host` via the DNS TXT record
 /// `_hs_key.<host>`.
 ///
-/// The first parseable record is used.
+/// Each record is parsed with [`keys::parse_public_key`], which accepts
+/// both the ASCII85 TXT format (`HS85:...`) and the legacy armored form;
+/// the first parseable record is used.
 pub fn public_key_from_dns(host: &str) -> Result<KeyInfo, NetError> {
     let name = dns_key_name(host);
     let records = dns_txt(&name)?;
     for record in &records {
-        if let Ok(info) = keys::unarmor_public_key(record) {
+        if let Ok(info) = keys::parse_public_key(record) {
             return Ok(info);
         }
     }
@@ -180,16 +185,16 @@ pub fn public_key_from_dns(host: &str) -> Result<KeyInfo, NetError> {
     }
 }
 
-/// Split armored text into DNS TXT character-strings of at most
+/// Split a public-key payload into DNS TXT character-strings of at most
 /// [`DNS_TXT_MAX`] bytes each.
 ///
-/// The armor is first collapsed to a single line (whitespace runs become
-/// single spaces) and then sliced into consecutive ≤255-byte pieces. A
-/// DNS operator publishes one TXT record whose character-strings are the
-/// returned lines; [`dns_txt`] concatenates them back into the single-line
-/// armor, which [`keys::unarmor_public_key`] parses (it tolerates
-/// whitespace splitting). The pieces contain no newlines, so providers
-/// that mangle embedded line breaks still round-trip correctly.
+/// The payload (armored text or the ASCII85 `HS85:...` line) is first
+/// collapsed to a single line and then sliced into consecutive ≤255-byte
+/// pieces. A DNS operator publishes one TXT record whose character-strings
+/// are the returned lines; [`dns_txt`] concatenates them back into the
+/// single-line payload, which [`keys::parse_public_key`] accepts. The
+/// pieces contain no newlines, so providers that mangle embedded line
+/// breaks still round-trip correctly.
 pub fn txt_chunks(text: &str) -> Vec<String> {
     let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     normalized
@@ -258,6 +263,30 @@ mod tests {
         assert_eq!(joined, expected);
         let info = keys::unarmor_public_key(&joined).unwrap();
         assert_eq!(info.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn ascii85_txt_chunks_join_and_parse_without_pem() {
+        let pair = keygen::generate(KemVariant::MlKem768, DsaVariant::MlDsa65).unwrap();
+        let info = keys::KeyInfo {
+            kem_variant: KemVariant::MlKem768,
+            dsa_variant: DsaVariant::MlDsa65,
+            kem_public_key: pair.kem_public.to_bytes(),
+            dsa_public_key: pair.sign_public.to_bytes(),
+            fingerprint: String::new(),
+        };
+        let line = keys::ascii85_public_key(&info);
+        assert!(
+            line.len() <= 4096,
+            "must fit DNS TXT limit, got {}",
+            line.len()
+        );
+        let chunks = txt_chunks(&line);
+        let joined: String = chunks.concat();
+        assert_eq!(joined, line);
+        let parsed = keys::parse_public_key(&joined).unwrap();
+        assert_eq!(parsed.fingerprint.len(), 64);
+        assert_eq!(parsed.kem_public_key, info.kem_public_key);
     }
 
     #[test]
