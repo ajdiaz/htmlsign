@@ -71,16 +71,23 @@
 //!
 //! ## `verify`
 //!
-//! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors] [--no-passphrase] [--passphrase-file FILE]`
+//! `hs verify FILE|URL [-k PUBLIC_KEY_FILE] [--ignore-tls-errors] [--format text|json] [--no-passphrase] [--passphrase-file FILE]`
 //!
 //! Locates every block with a `data-hs-signature` attribute, recomputes
 //! its canonical bytes, and checks the embedded ML-DSA signature. Exits
-//! non-zero if any block fails. With `-k`/`--key`, blocks are additionally
-//! required to have been signed by exactly the given public key (defeating
-//! re-signing of altered content with a different key). `-k` accepts
-//! **either** an armored public key file (`key.pub`) **or** a `.hskey`
-//! secret key file, which is unlocked with the passphrase (prompted
-//! unless `--no-passphrase` or `--passphrase-file` is given).
+//! non-zero if any block is invalid or mismatches the expected key. With
+//! `-k`/`--key`, blocks are additionally required to have been signed by
+//! exactly the given public key (defeating re-signing of altered content
+//! with a different key). `-k` accepts **either** an armored public key
+//! file (`key.pub`) **or** a `.hskey` secret key file, which is unlocked
+//! with the passphrase (prompted unless `--no-passphrase` or
+//! `--passphrase-file` is given).
+//!
+//! With `--format json` the report is emitted as machine-readable JSON
+//! instead of text: an object with `ok`, `total`, `verified`, and a `blocks`
+//! array, where each entry carries `element`, `valid`, `fingerprint`,
+//! `reason`, and — when a key was given or resolved from DNS — `key_match`
+//! (see [`html::build_json_report`]).
 //!
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless

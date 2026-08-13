@@ -417,6 +417,74 @@ pub fn render_report(results: &[BlockVerification]) -> (String, bool) {
     (report, all_ok)
 }
 
+/// Machine-readable verification report for `verify --format json`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VerificationReportJson {
+    /// Whether every block verified and matched the expected key, if any.
+    pub ok: bool,
+    /// Total number of signed blocks found.
+    pub total: usize,
+    /// Number of blocks with valid signatures.
+    pub verified: usize,
+    /// Per-block results.
+    pub blocks: Vec<BlockVerificationJson>,
+}
+
+/// Per-block entry of a JSON verification report.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BlockVerificationJson {
+    /// Element tag name.
+    pub element: String,
+    /// Whether the signature matches the block content.
+    pub valid: bool,
+    /// Fingerprint of the key pair that signed the block (empty if invalid).
+    pub fingerprint: String,
+    /// Failure reason, if any.
+    pub reason: Option<String>,
+    /// Whether the block's key matched the expected key; present only when
+    /// a key was supplied via `verify -k` or resolved from DNS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_match: Option<bool>,
+}
+
+/// Build a machine-readable report from verification results.
+///
+/// `key_matches` is an optional per-block list of whether each block's
+/// signature key matched the expected key (set when `verify -k` or DNS key
+/// pinning was used). The overall `ok` flag is true iff every block is
+/// valid and, when a key was given, every block matched it.
+pub fn build_json_report(
+    results: &[BlockVerification],
+    key_matches: Option<&[bool]>,
+) -> VerificationReportJson {
+    let total = results.len();
+    let verified = results.iter().filter(|r| r.valid).count();
+    let mut all_ok = results.iter().all(|r| r.valid);
+    let blocks = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let key_match = key_matches.and_then(|km| km.get(i)).copied();
+            if key_match == Some(false) {
+                all_ok = false;
+            }
+            BlockVerificationJson {
+                element: r.element.clone(),
+                valid: r.valid,
+                fingerprint: r.fingerprint.clone(),
+                reason: r.reason.clone(),
+                key_match,
+            }
+        })
+        .collect();
+    VerificationReportJson {
+        ok: all_ok,
+        total,
+        verified,
+        blocks,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,5 +712,66 @@ mod tests {
         assert!(!ok);
         assert!(report.contains("[0] <div> OK"));
         assert!(report.contains("[1] <span> FAIL"));
+    }
+
+    #[test]
+    fn build_json_report_without_key() {
+        let results = vec![
+            BlockVerification {
+                element: "div".into(),
+                fingerprint: "a".repeat(64),
+                valid: true,
+                reason: None,
+            },
+            BlockVerification::failed("span", "signature does not match"),
+        ];
+        let report = build_json_report(&results, None);
+        assert_eq!(report.total, 2);
+        assert_eq!(report.verified, 1);
+        assert!(!report.ok);
+        assert_eq!(report.blocks.len(), 2);
+        assert_eq!(report.blocks[0].key_match, None);
+        assert_eq!(report.blocks[0].element, "div");
+        assert!(!report.blocks[1].valid);
+        assert_eq!(
+            report.blocks[1].reason.as_deref(),
+            Some("signature does not match")
+        );
+    }
+
+    #[test]
+    fn build_json_report_with_key_mismatch() {
+        let results = vec![BlockVerification {
+            element: "div".into(),
+            fingerprint: "a".repeat(64),
+            valid: true,
+            reason: None,
+        }];
+        let report = build_json_report(&results, Some(&[true]));
+        assert!(report.ok);
+        assert_eq!(report.blocks[0].key_match, Some(true));
+
+        let report = build_json_report(&results, Some(&[false]));
+        assert!(!report.ok);
+        assert_eq!(report.blocks[0].key_match, Some(false));
+    }
+
+    #[test]
+    fn json_report_serializes_with_skip_optional_key_match() {
+        let results = vec![BlockVerification {
+            element: "div".into(),
+            fingerprint: "a".repeat(64),
+            valid: true,
+            reason: None,
+        }];
+        let text = serde_json::to_string(&build_json_report(&results, None)).unwrap();
+        assert!(text.contains("\"ok\":true"));
+        assert!(text.contains("\"element\":\"div\""));
+        assert!(
+            !text.contains("key_match"),
+            "key_match must be omitted without a key"
+        );
+        let text = serde_json::to_string(&build_json_report(&results, Some(&[true]))).unwrap();
+        assert!(text.contains("\"key_match\":true"));
     }
 }

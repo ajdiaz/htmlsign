@@ -4,7 +4,7 @@
 .SH NAME
 verify \- Verify signed blocks in an HTML file
 .SH SYNOPSIS
-\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
+\fBverify\fR [\fB\-k\fR|\fB\-\-key\fR] [\fB\-\-ignore\-tls\-errors\fR] [\fB\-\-format\fR \fI<FORMAT>\fR] [\fB\-\-no\-passphrase\fR] [\fB\-\-passphrase\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE|URL\fR> 
 .SH DESCRIPTION
 Verify signed blocks in an HTML file
 .SH OPTIONS
@@ -16,6 +16,9 @@ Accepts either an armored public key file (`key.pub`) or a `.hskey` secret key f
 .TP
 \fB\-\-ignore\-tls\-errors\fR
 Skip TLS certificate validation when verifying a URL
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR
+Output format: text (default) or json
 .TP
 \fB\-\-no\-passphrase\fR
 Use an empty passphrase (no prompt)

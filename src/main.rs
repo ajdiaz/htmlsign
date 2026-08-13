@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use hs::cli::{Cli, Commands};
+use hs::cli::{Cli, Commands, OutputFormat};
 use hs::crypto::keyfile::KdfParams;
 use hs::crypto::{DsaVariant, KemVariant};
 use hs::html::{self, BlockVerification, SigningKey};
@@ -177,6 +177,7 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
         ignore_tls_errors,
         no_passphrase,
         passphrase_file,
+        format,
     } = args
     else {
         unreachable!()
@@ -192,7 +193,6 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
     let results = html::verify_blocks(&html_input)
         .with_context(|| format!("verifying blocks in {}", file))?;
 
-    let mut ok = true;
     let expected = if let Some(pub_path) = key {
         let key_path = PathBuf::from(pub_path);
         let passphrase = if keys::is_armored_key(&key_path)? {
@@ -216,19 +216,36 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
     } else {
         None
     };
-    if let Some(expected) = expected {
-        for r in &results {
-            if r.fingerprint != expected.fingerprint {
-                println!(
-                    "[<{}>] key fingerprint mismatch: got {}",
-                    r.element, r.fingerprint
-                );
-                ok = false;
+
+    let key_matches = expected.as_ref().map(|expected| {
+        results
+            .iter()
+            .map(|r| r.fingerprint == expected.fingerprint)
+            .collect::<Vec<bool>>()
+    });
+    let ok = results.iter().all(|r| r.valid)
+        && key_matches.as_ref().is_none_or(|km| km.iter().all(|&m| m));
+
+    match *format {
+        OutputFormat::Json => {
+            let report = html::build_json_report(&results, key_matches.as_deref());
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        OutputFormat::Text => {
+            if let (Some(expected), Some(matches)) = (&expected, &key_matches) {
+                for (r, m) in results.iter().zip(matches) {
+                    if !m {
+                        println!(
+                            "[<{}>] key fingerprint mismatch: got {} (expected {})",
+                            r.element, r.fingerprint, expected.fingerprint
+                        );
+                    }
+                }
             }
+            print_verification_results(&results)?;
         }
     }
 
-    print_verification_results(&results)?;
     if ok {
         Ok(())
     } else {

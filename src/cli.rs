@@ -4,7 +4,16 @@
 //! subcommands. This module is purely structural — command dispatch
 //! and business logic live in `src/main.rs`.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+/// Output format for the `verify` command's report.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputFormat {
+    /// Human-readable text report.
+    Text,
+    /// Machine-readable JSON report.
+    Json,
+}
 
 /// Top-level CLI structure for the `hs` binary.
 #[derive(Parser)]
@@ -141,6 +150,14 @@ pub enum Commands {
             help = "Skip TLS certificate validation when verifying a URL"
         )]
         ignore_tls_errors: bool,
+        /// Output format of the verification report.
+        #[arg(
+            long = "format",
+            value_enum,
+            default_value_t = OutputFormat::Text,
+            help = "Output format: text (default) or json"
+        )]
+        format: OutputFormat,
         /// Use an empty passphrase (no prompt).
         #[arg(long = "no-passphrase", help = "Use an empty passphrase (no prompt)")]
         no_passphrase: bool,

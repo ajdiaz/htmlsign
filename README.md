@@ -135,6 +135,33 @@ half:
 $ hs verify index.html -k ~/.local/share/hs/keys/default.hskey
 ```
 
+For automation, `--format json` emits the result as machine-readable JSON —
+with `ok`, `total`, `verified`, and a `blocks` array (each entry has
+`element`, `valid`, `fingerprint`, `reason`, and `key_match` when a key was
+given):
+
+```bash
+$ hs verify index.html --format json
+{
+  "ok": true,
+  "total": 1,
+  "verified": 1,
+  "blocks": [
+    {
+      "element": "div",
+      "valid": true,
+      "fingerprint": "7f6a2c...c3d09b",
+      "reason": null,
+      "key_match": true
+    }
+  ]
+}
+```
+
+The exit status is non-zero whenever the verification fails (any invalid
+block or key mismatch), so `hs verify --format json` drops straight into a
+CI pipeline.
+
 ### 🌐 Remote verification via URL
 
 `hs verify` accepts an `http://` or `https://` URL instead of a local file:
@@ -206,6 +233,7 @@ hs sign FILE SELECTOR [-k KEY.hskey] [-o OUT.html]
            [--no-passphrase] [--passphrase-file FILE]
 
 hs verify FILE|URL [-k KEY.pub|KEY.hskey] [--ignore-tls-errors]
+           [--format text|json]
            [--no-passphrase] [--passphrase-file FILE]
 
 hs view-key [-k KEY.hskey] [--no-passphrase] [--passphrase-file FILE]

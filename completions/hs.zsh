@@ -68,6 +68,7 @@ _arguments "${_arguments_options[@]}" : \
 '--key=[Require blocks to be signed with this public key (armored or .hskey)]:KEY:_default' \
 '--passphrase-file=[Read the passphrase from a file (first line)]:PASSPHRASE_FILE:_default' \
 '--ignore-tls-errors[Skip TLS certificate validation when verifying a URL]' \
+'--format=[Output format: text (default) or json]:FORMAT:(text json)' \
 '--no-passphrase[Use an empty passphrase (no prompt)]' \
 '-n[Do nothing, print dry-run message]' \
 '--dry-run[Do nothing, print dry-run message]' \

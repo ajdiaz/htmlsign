@@ -289,12 +289,16 @@ _hs() {
             return 0
             ;;
         hs__subcmd__verify)
-            opts="-k -n -h --key --ignore-tls-errors --no-passphrase --passphrase-file --dry-run --help"
+            opts="-k -n -h --key --ignore-tls-errors --format --no-passphrase --passphrase-file --dry-run --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --format)
+                    COMPREPLY=( $(compgen -W "text json" -- "${cur}") )
+                    return 0
+                    ;;
                 --key)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0

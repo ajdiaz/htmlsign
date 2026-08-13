@@ -52,6 +52,7 @@ complete -c hs -n "__fish_hs_using_subcommand sign" -s h -l help -d 'Print help'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s k -l key -d 'Require blocks to be signed with this public key (armored or .hskey)' -r
 complete -c hs -n "__fish_hs_using_subcommand verify" -l passphrase-file -d 'Read the passphrase from a file (first line)' -r
 complete -c hs -n "__fish_hs_using_subcommand verify" -l ignore-tls-errors -d 'Skip TLS certificate validation when verifying a URL'
+complete -c hs -n "__fish_hs_using_subcommand verify" -l format -d 'Output format: text (default) or json' -r -f -a 'text json'
 complete -c hs -n "__fish_hs_using_subcommand verify" -l no-passphrase -d 'Use an empty passphrase (no prompt)'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s n -l dry-run -d 'Do nothing, print dry-run message'
 complete -c hs -n "__fish_hs_using_subcommand verify" -s h -l help -d 'Print help (see more with \'--help\')'
