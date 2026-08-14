@@ -163,7 +163,10 @@ fn cmd_sign(args: &hs::cli::Commands) -> Result<()> {
     std::fs::rename(&tmp_path, &out_path).with_context(|| format!("writing {}", out_path))?;
 
     for name in &skipped {
-        println!("Skipped <{}> (already inside a signed block)", name);
+        eprintln!(
+            "warning: <{}> is inside another signed block and was not signed",
+            name
+        );
     }
     println!("Signed {} block(s) in {}", signed.len(), out_path);
     if let Some(first) = signed.first() {

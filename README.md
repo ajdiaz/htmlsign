@@ -101,11 +101,11 @@ Options: `-k key.hskey`, `-o out.html`, `--no-passphrase`,
 `--passphrase-file FILE`.
 
 If a matched block already sits inside another signed block, `hs` **skips**
-it — it is covered by the enclosing signature — and reports it:
+it — it is covered by the enclosing signature — and prints a warning:
 
 ```bash
 $ hs sign index.html .inner
-Skipped <div> (already inside a signed block)
+warning: <div> is inside another signed block and was not signed
 Signed 0 block(s) in index.html
 ```
 
