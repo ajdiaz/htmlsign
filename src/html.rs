@@ -47,12 +47,17 @@
 use crate::crypto::{sign, CryptoError, DsaVariant, KemVariant};
 use crate::format::{self, FormatError};
 use ego_tree::NodeId;
+use html5ever::buffer_queue::BufferQueue;
 use html5ever::serialize::{HtmlSerializer, Serialize, SerializeOpts, Serializer, TraversalScope};
+use html5ever::tokenizer::{TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts};
 use html5ever::{ns, LocalName, QualName};
 use scraper::{ElementRef, Html, Selector};
 use sha3::{Digest, Sha3_256};
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::{self, Write};
+use std::rc::Rc;
 use tendril::StrTendril;
 use thiserror::Error;
 
@@ -98,13 +103,21 @@ pub enum HtmlError {
 ///
 /// Used to compute the canonical bytes of a block without its (possibly
 /// stale) `data-hs-signature` attribute, and to make those bytes robust to
-/// server-side minification (see the module docs).
+/// server-side minification (see the module docs). Any *descendant* element
+/// carrying the same attribute (a block that is already signed, or signed
+/// later in the same run) has its whole subtree omitted from the output, so
+/// the outer signature never covers an inner signed block — the inner block
+/// is verified separately against its own signature.
 struct CanonicalSerializer<W: Write> {
     inner: HtmlSerializer<W>,
     skip: LocalName,
     /// Stack marking whether the current nesting level is inside a
     /// whitespace-sensitive element ([`WS_SENSITIVE_ELEMENTS`]).
     ws_sensitive: Vec<bool>,
+    /// Depth of signed subtrees currently being omitted.
+    skip_depth: usize,
+    /// Whether the root element of the serialized block has been visited.
+    root_seen: bool,
 }
 
 impl<W: Write> CanonicalSerializer<W> {
@@ -113,6 +126,11 @@ impl<W: Write> CanonicalSerializer<W> {
     fn preserving_whitespace(&self) -> bool {
         self.ws_sensitive.last().copied().unwrap_or(false)
     }
+
+    /// Whether the writer is currently inside an omitted signed subtree.
+    fn in_skipped(&self) -> bool {
+        self.skip_depth > 0
+    }
 }
 
 impl<W: Write> Serializer for CanonicalSerializer<W> {
@@ -120,20 +138,38 @@ impl<W: Write> Serializer for CanonicalSerializer<W> {
     where
         AttrIter: Iterator<Item = (&'a QualName, &'a str)>,
     {
+        let attrs: Vec<(&QualName, &str)> = attrs.collect();
+        if self.in_skipped() {
+            self.skip_depth += 1;
+            return Ok(());
+        }
+        let signed = attrs.iter().any(|(qn, _)| qn.local == self.skip);
+        if signed && self.root_seen {
+            self.skip_depth = 1;
+            return Ok(());
+        }
+        self.root_seen = true;
         let sensitive =
             name.ns == ns!(html) && WS_SENSITIVE_ELEMENTS.contains(&name.local.as_ref());
         self.ws_sensitive.push(sensitive);
         let Self { inner, skip, .. } = self;
-        let filtered = attrs.filter(|(qn, _)| &qn.local != skip);
+        let filtered = attrs.into_iter().filter(|(qn, _)| &qn.local != skip);
         inner.start_elem(name, filtered)
     }
 
     fn end_elem(&mut self, name: QualName) -> io::Result<()> {
+        if self.in_skipped() {
+            self.skip_depth -= 1;
+            return Ok(());
+        }
         self.ws_sensitive.pop();
         self.inner.end_elem(name)
     }
 
     fn write_text(&mut self, text: &str) -> io::Result<()> {
+        if self.in_skipped() {
+            return Ok(());
+        }
         if self.preserving_whitespace() {
             self.inner.write_text(text)
         } else if let Some(collapsed) = collapse_whitespace(text) {
@@ -144,14 +180,23 @@ impl<W: Write> Serializer for CanonicalSerializer<W> {
     }
 
     fn write_comment(&mut self, text: &str) -> io::Result<()> {
+        if self.in_skipped() {
+            return Ok(());
+        }
         self.inner.write_comment(text)
     }
 
     fn write_doctype(&mut self, name: &str) -> io::Result<()> {
+        if self.in_skipped() {
+            return Ok(());
+        }
         self.inner.write_doctype(name)
     }
 
     fn write_processing_instruction(&mut self, target: &str, data: &str) -> io::Result<()> {
+        if self.in_skipped() {
+            return Ok(());
+        }
         self.inner.write_processing_instruction(target, data)
     }
 }
@@ -194,6 +239,8 @@ fn canonical_html(element: &ElementRef, skip: &str) -> Result<String, HtmlError>
         inner,
         skip: LocalName::from(skip),
         ws_sensitive: Vec::new(),
+        skip_depth: 0,
+        root_seen: false,
     };
     element.serialize(&mut ser, TraversalScope::IncludeNode)?;
     String::from_utf8(out).map_err(|_| HtmlError::InvalidUtf8)
@@ -285,7 +332,8 @@ pub fn sign_blocks(
     let fingerprint = crate::crypto::keyfile::fingerprint(&key.kem_public_key, &key.dsa_public_key);
 
     let mut signed: Vec<SignedBlock> = Vec::with_capacity(matches.len());
-    for (node_id, name) in &matches {
+    let attr = LocalName::from(SIGNATURE_ATTR);
+    for (node_id, name) in matches.iter().rev() {
         let node_ref = document
             .tree
             .get(*node_id)
@@ -297,6 +345,17 @@ pub fn sign_blocks(
         let signature = sign::sign(&key.dsa_secret_key, &digest, key.dsa_variant)?;
         let value = format::encode_signature(key.dsa_variant, &signature)?;
 
+        let node_id = *node_id;
+        if let Some(mut node) = document.tree.get_mut(node_id) {
+            if let scraper::Node::Element(element) = node.value() {
+                element.attrs.retain(|(qn, _)| qn.local != attr);
+                element.attrs.push((
+                    QualName::new(None, ns!(), attr.clone()),
+                    StrTendril::from(value.as_str()),
+                ));
+            }
+        }
+
         signed.push(SignedBlock {
             element: name.clone(),
             content_len: canonical.len(),
@@ -304,22 +363,7 @@ pub fn sign_blocks(
             fingerprint: fingerprint.clone(),
         });
     }
-
-    {
-        let tree = &mut document.tree;
-        let attr = LocalName::from(SIGNATURE_ATTR);
-        for ((node_id, _), block) in matches.iter().zip(signed.iter()) {
-            if let Some(mut node) = tree.get_mut(*node_id) {
-                if let scraper::Node::Element(element) = node.value() {
-                    element.attrs.retain(|(qn, _)| qn.local != attr);
-                    element.attrs.push((
-                        QualName::new(None, ns!(), attr.clone()),
-                        StrTendril::from(block.signature_value.as_str()),
-                    ));
-                }
-            }
-        }
-    }
+    signed.reverse();
 
     let output = document.html();
     Ok((output, signed))
@@ -426,6 +470,106 @@ pub fn render_report(results: &[BlockVerification]) -> (String, bool) {
     (report, all_ok)
 }
 
+/// A signed block nested inside another signed block.
+///
+/// Because the outer block's signing payload excludes signed descendant
+/// subtrees, the inner block is verified separately against its own
+/// signature. This warning reports that relationship.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NestedSignatureWarning {
+    /// Name of the inner signed block.
+    pub element: String,
+    /// Approximate line of the inner block in the source document.
+    pub line: u64,
+    /// Name of the enclosing signed block.
+    pub outside: String,
+}
+
+/// Tokenize `html` and return, in document order, the source line number of
+/// every start tag carrying a `data-hs-signature` attribute.
+///
+/// Used to report the location of nested signed blocks. Line numbers are
+/// best-effort: html5ever does not expose them through `scraper`, so a
+/// second, light tokenizer pass over the same input records them.
+fn signed_block_lines(html: &str) -> Vec<u64> {
+    struct Sink {
+        lines: Rc<RefCell<Vec<u64>>>,
+    }
+    impl TokenSink for Sink {
+        type Handle = ();
+        fn process_token(&self, token: Token, line_number: u64) -> TokenSinkResult<()> {
+            if let Token::TagToken(tag) = token {
+                if tag.kind == TagKind::StartTag
+                    && tag.attrs.iter().any(|a| &*a.name.local == SIGNATURE_ATTR)
+                {
+                    self.lines.borrow_mut().push(line_number);
+                }
+            }
+            TokenSinkResult::Continue
+        }
+    }
+
+    let lines = Rc::new(RefCell::new(Vec::new()));
+    let tokenizer = Tokenizer::new(
+        Sink {
+            lines: Rc::clone(&lines),
+        },
+        TokenizerOpts::default(),
+    );
+    let queue = BufferQueue::default();
+    queue.push_back(StrTendril::from(html));
+    let _ = tokenizer.feed(&queue);
+    tokenizer.end();
+    Rc::try_unwrap(lines).map_or_else(|rc| rc.borrow().clone(), |cell| cell.into_inner())
+}
+
+/// Find signed blocks nested inside other signed blocks.
+///
+/// A block carrying `data-hs-signature` that is a descendant of another
+/// signed block is reported as being outside the enclosing block's
+/// signature: its subtree was excluded from the outer signing payload, so
+/// it is (and must be) verified against its own signature.
+pub fn find_nested_signatures(html: &str) -> Vec<NestedSignatureWarning> {
+    let document = Html::parse_document(html);
+    let selector = match Selector::parse("[data-hs-signature]") {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let lines = signed_block_lines(html);
+
+    let signed: Vec<(NodeId, String)> = document
+        .select(&selector)
+        .map(|element| (element.id(), element.value().name().to_string()))
+        .collect();
+    let signed_ids: HashSet<NodeId> = signed.iter().map(|(id, _)| *id).collect();
+
+    let mut warnings = Vec::new();
+    for (index, (node_id, name)) in signed.iter().enumerate() {
+        let node = match document.tree.get(*node_id) {
+            Some(node) => node,
+            None => continue,
+        };
+        let element = match ElementRef::wrap(node) {
+            Some(element) => element,
+            None => continue,
+        };
+        let outside = element
+            .ancestors()
+            .find(|ancestor| signed_ids.contains(&ancestor.id()))
+            .and_then(|ancestor| document.tree.get(ancestor.id()))
+            .and_then(|node| node.value().as_element())
+            .map(|element| element.name().to_string());
+        if let Some(outside) = outside {
+            warnings.push(NestedSignatureWarning {
+                element: name.clone(),
+                line: lines.get(index).copied().unwrap_or(0),
+                outside,
+            });
+        }
+    }
+    warnings
+}
+
 /// Where the key used for verification comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyOrigin {
@@ -493,6 +637,8 @@ pub struct VerificationReportJson {
     pub verified: usize,
     /// Where the verification key is located.
     pub key: KeySourceJson,
+    /// Warnings for signed blocks nested inside other signed blocks.
+    pub warnings: Vec<NestedSignatureWarning>,
     /// Per-block results.
     pub blocks: Vec<BlockVerificationJson>,
 }
@@ -513,10 +659,12 @@ pub struct BlockVerificationJson {
 /// Build a machine-readable report from verification results.
 ///
 /// The overall `ok` flag is true iff every block is valid. `key_origin`
-/// describes where the key used for verification is located.
+/// describes where the key used for verification is located, and `warnings`
+/// lists signed blocks nested inside other signed blocks.
 pub fn build_json_report(
     results: &[BlockVerification],
     key_origin: &KeyOrigin,
+    warnings: &[NestedSignatureWarning],
 ) -> VerificationReportJson {
     let total = results.len();
     let verified = results.iter().filter(|r| r.valid).count();
@@ -535,6 +683,7 @@ pub fn build_json_report(
         total,
         verified,
         key: key_origin.to_json(),
+        warnings: warnings.to_vec(),
         blocks,
     }
 }
@@ -774,6 +923,41 @@ mod tests {
     }
 
     #[test]
+    fn sign_excludes_nested_signed_blocks() {
+        let key = test_signing_key();
+        let html = r#"<section class="outer"><p>a</p><div class="inner"><p>b</p></div></section>"#;
+        let (step1, _) = sign_blocks(html, "div.inner", &key).unwrap();
+        let (step2, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
+
+        let info = test_key_info(&key);
+        let results = verify_blocks(&step2, &info).unwrap();
+        assert_eq!(results.len(), 2, "outer and inner are both signed");
+        assert!(results.iter().all(|r| r.valid));
+
+        let tampered = step2.replace("<p>b</p>", "<p>B</p>");
+        let results = verify_blocks(&tampered, &info).unwrap();
+        assert!(
+            !results[1].valid,
+            "inner tampering breaks the inner signature"
+        );
+        assert!(results[0].valid, "outer signature excludes the inner block");
+    }
+
+    #[test]
+    fn find_nested_signatures_warns() {
+        let key = test_signing_key();
+        let html = "<section class=\"outer\"><div class=\"inner\"><p>x</p></div></section>";
+        let (step1, _) = sign_blocks(html, "div.inner", &key).unwrap();
+        let (step2, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
+
+        let warnings = find_nested_signatures(&step2);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].element, "div");
+        assert_eq!(warnings[0].outside, "section");
+        assert!(warnings[0].line >= 1);
+    }
+
+    #[test]
     fn render_report_flags_failures() {
         let results = vec![
             BlockVerification {
@@ -802,10 +986,11 @@ mod tests {
             BlockVerification::failed("span", "signature does not match"),
         ];
         let origin = KeyOrigin::File("/keys/key.pub".into());
-        let report = build_json_report(&results, &origin);
+        let report = build_json_report(&results, &origin, &[]);
         assert_eq!(report.total, 2);
         assert_eq!(report.verified, 1);
         assert!(!report.ok);
+        assert!(report.warnings.is_empty());
         assert_eq!(report.blocks.len(), 2);
         assert_eq!(report.blocks[0].element, "div");
         assert!(!report.blocks[1].valid);
@@ -829,7 +1014,7 @@ mod tests {
             record: "_hs_key.example.org".into(),
             url: Some("https://example.org/hs.pub".into()),
         };
-        let report = build_json_report(&results, &origin);
+        let report = build_json_report(&results, &origin, &[]);
         assert!(report.ok);
         assert_eq!(report.key.source, "dns");
         assert_eq!(report.key.location.as_deref(), Some("_hs_key.example.org"));
@@ -879,6 +1064,7 @@ mod tests {
         let text = serde_json::to_string(&build_json_report(
             &results,
             &KeyOrigin::File("k.pub".into()),
+            &[],
         ))
         .unwrap();
         assert!(text.contains("\"ok\":true"));

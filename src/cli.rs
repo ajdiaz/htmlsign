@@ -180,7 +180,10 @@ and the signing key is resolved from the _hs_key.<host> DNS pin record,
 downloading the key and checking its SHA3-256 fingerprint against the pin.
 
 --format json emits a machine-readable report (ok, total, verified, key
-origin, and per-block results) instead of the human-readable text report."
+origin, per-block results, and warnings) instead of the human-readable text
+report. A signed block nested inside another signed block is reported as a
+warning (\"<inner> in line N is outside <outer> signature\") — its subtree
+is excluded from the outer signature and it is verified separately."
     )]
     Verify {
         /// Input HTML file, or an http(s) URL to fetch and verify.

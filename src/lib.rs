@@ -84,9 +84,11 @@
 //! With `--format json` the report is emitted as machine-readable JSON
 //! instead of text: an object with `ok`, `total`, `verified`, a `key`
 //! object describing where the key is located (`source` is `file` or
-//! `dns`, plus `location` and `url` where applicable), and a `blocks`
+//! `dns`, plus `location` and `url` where applicable), a `warnings` array
+//! listing signed blocks nested inside other signed blocks, and a `blocks`
 //! array, where each entry carries `element`, `valid`, `fingerprint`, and
-//! `reason` (see [`html::build_json_report`] and [`html::KeyOrigin`]).
+//! `reason` (see [`html::build_json_report`], [`html::KeyOrigin`], and
+//! [`html::NestedSignatureWarning`]).
 //!
 //! When the input is an `http://` or `https://` URL, the document is
 //! fetched over HTTPS — verifying the TLS certificate unless
@@ -147,6 +149,9 @@
 //! - Verification always uses an explicitly supplied key — from `verify -k`,
 //!   the default key file, or the DNS `_hs_key` pin — so the trust anchor
 //!   is the key you provide, not a key carried by the document.
+//! - Signed blocks nested inside other signed blocks are excluded from the
+//!   outer block's signing payload and verified separately against their
+//!   own signatures; `verify` reports them as warnings.
 //! - All randomness comes from [`rand::rngs::OsRng`]; secret material is zeroized.
 //!
 //! # Cryptography

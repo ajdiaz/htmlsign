@@ -140,7 +140,8 @@ FAIL: 0 of 1 blocks verified.
 
 For automation, `--format json` emits the result as machine-readable JSON —
 with `ok`, `total`, `verified`, a `key` object describing where the key is
-located (`source` is `file` or `dns`), and a `blocks` array (each entry has
+located (`source` is `file` or `dns`), a `warnings` array (signed blocks
+nested inside other signed blocks), and a `blocks` array (each entry has
 `element`, `valid`, `fingerprint`, and `reason`):
 
 ```bash
@@ -150,6 +151,7 @@ $ hs verify index.html -k key.pub --format json
   "total": 1,
   "verified": 1,
   "key": { "source": "file", "location": "key.pub" },
+  "warnings": [],
   "blocks": [
     {
       "element": "div",
@@ -297,6 +299,12 @@ cargo fmt --check
   short `HSPIN:SHA3-256:<fingerprint>:<url>` line — no 4096-byte limit, no
   quoting pitfalls — and a compromised server cannot swap in a different
   key without the pin failing.
+- **Nested signed blocks** 🪆: when signing a block that already contains
+  signed blocks, the inner signed subtrees are **excluded** from the outer
+  signing payload — re-signing or changing an inner block never breaks the
+  outer signature. Each inner block keeps its own signature and is checked
+  separately; `verify` reports the nesting as a warning (`<div> in line 333
+  is outside <section> signature`) in both text and JSON output.
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.
 

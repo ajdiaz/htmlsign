@@ -235,15 +235,22 @@ fn cmd_verify(args: &hs::cli::Commands) -> Result<()> {
 
     let results = html::verify_blocks(&html_input, &expected)
         .with_context(|| format!("verifying blocks in {}", file))?;
+    let warnings = html::find_nested_signatures(&html_input);
     let ok = results.iter().all(|r| r.valid);
 
     match *format {
         OutputFormat::Json => {
-            let report = html::build_json_report(&results, &key_origin);
+            let report = html::build_json_report(&results, &key_origin, &warnings);
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         OutputFormat::Text => {
             println!("key: {}", key_origin.describe());
+            for warning in &warnings {
+                eprintln!(
+                    "warning: <{}> in line {} is outside <{}> signature",
+                    warning.element, warning.line, warning.outside
+                );
+            }
             print_verification_results(&results)?;
         }
     }
