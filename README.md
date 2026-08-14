@@ -100,6 +100,15 @@ Signed 1 block(s) in index.html
 Options: `-k key.hskey`, `-o out.html`, `--no-passphrase`,
 `--passphrase-file FILE`.
 
+If a matched block already sits inside another signed block, `hs` **skips**
+it — it is covered by the enclosing signature — and reports it:
+
+```bash
+$ hs sign index.html .inner
+Skipped <div> (already inside a signed block)
+Signed 0 block(s) in index.html
+```
+
 ---
 
 ## ✔️ Verifying
@@ -302,9 +311,12 @@ cargo fmt --check
 - **Nested signed blocks** 🪆: when signing a block that already contains
   signed blocks, the inner signed subtrees are **excluded** from the outer
   signing payload — re-signing or changing an inner block never breaks the
-  outer signature. Each inner block keeps its own signature and is checked
-  separately; `verify` reports the nesting as a warning (`<div> in line 333
-  is outside <section> signature`) in both text and JSON output.
+  outer signature. Signing a block that already sits inside another signed
+  block is a **no-op** (`hs sign` skips it and reports it), since the
+  enclosing signature already covers it. Each inner block keeps its own
+  signature and is checked separately; `verify` reports the nesting as a
+  warning (`<div> in line 333 is outside <section> signature`) in both text
+  and JSON output.
 - **Memory safety**: no `unsafe`, secret material is zeroized, and all
   key material on disk is passphrase-encrypted.
 

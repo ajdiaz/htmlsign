@@ -153,7 +153,7 @@ fn cmd_sign(args: &hs::cli::Commands) -> Result<()> {
     };
 
     let html_input = read_html(file)?;
-    let (signed_html, signed) = html::sign_blocks(&html_input, selector, &signing_key)
+    let (signed_html, signed, skipped) = html::sign_blocks(&html_input, selector, &signing_key)
         .with_context(|| format!("signing blocks in {}", file))?;
 
     let out_path = output.clone().unwrap_or_else(|| file.clone());
@@ -162,8 +162,13 @@ fn cmd_sign(args: &hs::cli::Commands) -> Result<()> {
     std::fs::write(&tmp_path, &signed_html).with_context(|| format!("writing {}", out_path))?;
     std::fs::rename(&tmp_path, &out_path).with_context(|| format!("writing {}", out_path))?;
 
+    for name in &skipped {
+        println!("Skipped <{}> (already inside a signed block)", name);
+    }
     println!("Signed {} block(s) in {}", signed.len(), out_path);
-    println!("  key fingerprint: {}", signed[0].fingerprint);
+    if let Some(first) = signed.first() {
+        println!("  key fingerprint: {}", first.fingerprint);
+    }
     for block in &signed {
         println!("  <{}> signed {} bytes", block.element, block.content_len);
     }

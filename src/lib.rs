@@ -63,7 +63,11 @@
 //! existing `data-hs-signature`, signs the SHA3-256 digest of the canonical
 //! serialization of the block (hash-then-sign, so signing cost is
 //! independent of block size), and injects the new signature attribute.
-//! The output is written to `--output` or back over `FILE` in place.
+//! A matched block that already sits inside another signed block is
+//! **skipped** — it is covered by the enclosing signature and is left
+//! untouched (signed descendant subtrees are excluded from an outer
+//! block's payload, so re-signing an inner block never breaks the outer
+//! one). The output is written to `--output` or back over `FILE` in place.
 //!
 //! The secret key defaults to `~/.local/share/hs/keys/default.hskey`;
 //! use `-k`/`--key` to pick another. The passphrase is prompted unless

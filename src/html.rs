@@ -309,13 +309,17 @@ impl BlockVerification {
 
 /// Sign every block matching `selector` in the document.
 ///
-/// Returns the serialized document with the injected signatures and the
-/// list of signed blocks.
+/// Returns the serialized document with the injected signatures, the list
+/// of signed blocks, and the list of matched blocks that were **skipped**
+/// because they sit inside another signed block (an ancestor already
+/// carries `data-hs-signature`, or is itself being signed in this run).
+/// Skipped blocks are left untouched: they are already covered by the
+/// enclosing signature.
 pub fn sign_blocks(
     html: &str,
     selector: &str,
     key: &SigningKey,
-) -> Result<(String, Vec<SignedBlock>), HtmlError> {
+) -> Result<(String, Vec<SignedBlock>, Vec<String>), HtmlError> {
     let mut document = Html::parse_document(html);
     let selector_str = selector.to_string();
     let selector =
@@ -328,10 +332,12 @@ pub fn sign_blocks(
     if matches.is_empty() {
         return Err(HtmlError::NoMatch(selector_str));
     }
+    let matched_ids: HashSet<NodeId> = matches.iter().map(|(id, _)| *id).collect();
 
     let fingerprint = crate::crypto::keyfile::fingerprint(&key.kem_public_key, &key.dsa_public_key);
 
     let mut signed: Vec<SignedBlock> = Vec::with_capacity(matches.len());
+    let mut skipped: Vec<String> = Vec::new();
     let attr = LocalName::from(SIGNATURE_ATTR);
     for (node_id, name) in matches.iter().rev() {
         let node_ref = document
@@ -339,6 +345,18 @@ pub fn sign_blocks(
             .get(*node_id)
             .ok_or(HtmlError::MissingElement)?;
         let element = ElementRef::wrap(node_ref).ok_or(HtmlError::MissingElement)?;
+
+        let inside_signed = element.ancestors().any(|ancestor| {
+            matched_ids.contains(&ancestor.id())
+                || ancestor
+                    .value()
+                    .as_element()
+                    .is_some_and(|e| e.attr(SIGNATURE_ATTR).is_some())
+        });
+        if inside_signed {
+            skipped.push(name.clone());
+            continue;
+        }
 
         let canonical = canonical_html(&element, SIGNATURE_ATTR)?;
         let digest = block_digest(canonical.as_bytes());
@@ -364,9 +382,10 @@ pub fn sign_blocks(
         });
     }
     signed.reverse();
+    skipped.reverse();
 
     let output = document.html();
-    Ok((output, signed))
+    Ok((output, signed, skipped))
 }
 
 /// Verify every block carrying a `data-hs-signature` attribute.
@@ -733,7 +752,7 @@ mod tests {
     #[test]
     fn sign_injects_attribute_and_preserves_other_content() {
         let key = test_signing_key();
-        let (output, signed) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, signed, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         assert_eq!(signed.len(), 1);
         assert!(signed[0]
             .signature_value
@@ -749,7 +768,7 @@ mod tests {
         <div class="text"><p>a</p></div>
         <div class="text"><p>b</p></div>
         </body></html>"#;
-        let (output, signed) = sign_blocks(html, "div.text", &key).unwrap();
+        let (output, signed, _) = sign_blocks(html, "div.text", &key).unwrap();
         assert_eq!(signed.len(), 2);
         assert_eq!(output.matches("data-hs-signature=").count(), 2);
     }
@@ -771,7 +790,7 @@ mod tests {
     #[test]
     fn verify_round_trip_succeeds() {
         let key = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let results = verify_blocks(&output, &test_key_info(&key)).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].valid, "signed block must verify");
@@ -819,7 +838,7 @@ mod tests {
     #[test]
     fn verify_detects_tampering() {
         let key = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let tampered = output.replace("<p>Some text</p>", "<p>Evil text</p>");
         let results = verify_blocks(&tampered, &test_key_info(&key)).unwrap();
         assert_eq!(results.len(), 1);
@@ -829,7 +848,7 @@ mod tests {
     #[test]
     fn verify_tolerates_whitespace_only_changes() {
         let key = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let reformatted = output
             .replace("<p>Some text</p>", "<p>Some   text</p>\n")
             .replace("</div>", "</div>\n\n");
@@ -840,7 +859,7 @@ mod tests {
     #[test]
     fn verify_tolerates_minified_block() {
         let key = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let minified = output
             .chars()
             .filter(|&c| c != '\n' && c != '\r' && c != '\t')
@@ -854,7 +873,7 @@ mod tests {
         let key = test_signing_key();
         let html = r#"<div class="x"><pre>a
   b</pre><script>let x = "a  b";</script></div>"#;
-        let (output, _) = sign_blocks(html, "div.x", &key).unwrap();
+        let (output, _, _) = sign_blocks(html, "div.x", &key).unwrap();
         assert!(verify_blocks(&output, &test_key_info(&key)).unwrap()[0].valid);
         let tampered = output.replace("a\n  b", "a\nb");
         let results = verify_blocks(&tampered, &test_key_info(&key)).unwrap();
@@ -894,7 +913,7 @@ mod tests {
     #[test]
     fn verify_detects_removed_signature() {
         let key = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let stripped = output
             .lines()
             .map(|l| {
@@ -914,7 +933,7 @@ mod tests {
     fn verify_wrong_key_fails() {
         let key = test_signing_key();
         let other = test_signing_key();
-        let (output, _) = sign_blocks(DOC, "div.text", &key).unwrap();
+        let (output, _, _) = sign_blocks(DOC, "div.text", &key).unwrap();
         let results = verify_blocks(&output, &test_key_info(&other)).unwrap();
         assert!(
             !results[0].valid,
@@ -926,8 +945,8 @@ mod tests {
     fn sign_excludes_nested_signed_blocks() {
         let key = test_signing_key();
         let html = r#"<section class="outer"><p>a</p><div class="inner"><p>b</p></div></section>"#;
-        let (step1, _) = sign_blocks(html, "div.inner", &key).unwrap();
-        let (step2, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
+        let (step1, _, _) = sign_blocks(html, "div.inner", &key).unwrap();
+        let (step2, _, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
 
         let info = test_key_info(&key);
         let results = verify_blocks(&step2, &info).unwrap();
@@ -947,14 +966,47 @@ mod tests {
     fn find_nested_signatures_warns() {
         let key = test_signing_key();
         let html = "<section class=\"outer\"><div class=\"inner\"><p>x</p></div></section>";
-        let (step1, _) = sign_blocks(html, "div.inner", &key).unwrap();
-        let (step2, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
+        let (step1, _, _) = sign_blocks(html, "div.inner", &key).unwrap();
+        let (step2, _, _) = sign_blocks(&step1, "section.outer", &key).unwrap();
 
         let warnings = find_nested_signatures(&step2);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].element, "div");
         assert_eq!(warnings[0].outside, "section");
         assert!(warnings[0].line >= 1);
+    }
+
+    #[test]
+    fn sign_skips_blocks_inside_signed_block() {
+        let key = test_signing_key();
+        let html = r#"<section class="outer"><p>a</p><div class="inner"><p>b</p></div></section>"#;
+        let (step1, signed1, skipped1) = sign_blocks(html, "section.outer", &key).unwrap();
+        assert_eq!(signed1.len(), 1);
+        assert!(skipped1.is_empty());
+
+        let (step2, signed2, skipped2) = sign_blocks(&step1, "div.inner", &key).unwrap();
+        assert!(
+            signed2.is_empty(),
+            "block inside a signed block is not signed"
+        );
+        assert_eq!(skipped2, vec!["div".to_string()]);
+        assert_eq!(
+            step2.matches("data-hs-signature=").count(),
+            1,
+            "only the outer signature remains"
+        );
+    }
+
+    #[test]
+    fn sign_same_run_skips_inner_when_outer_selected() {
+        let key = test_signing_key();
+        let html = r#"<section class="outer"><div class="inner"><p>b</p></div></section>"#;
+        let (output, signed, skipped) =
+            sign_blocks(html, "section.outer, div.inner", &key).unwrap();
+        assert_eq!(signed.len(), 1, "only the outer block is signed");
+        assert_eq!(signed[0].element, "section");
+        assert_eq!(skipped, vec!["div".to_string()]);
+        assert_eq!(output.matches("data-hs-signature=").count(), 1);
     }
 
     #[test]

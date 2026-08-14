@@ -129,7 +129,11 @@ minification — and inject the new signature attribute.
 The output is written to --output, or back over FILE in place. The secret
 key defaults to ~/.local/share/hs/keys/default.hskey (override with -k);
 its passphrase is prompted unless --no-passphrase or --passphrase-file is
-given."
+given.
+
+A block that already sits inside another signed block is skipped (it is
+covered by the enclosing signature); skipped blocks are reported and left
+untouched."
     )]
     Sign {
         /// Input HTML file.
